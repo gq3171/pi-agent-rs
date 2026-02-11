@@ -36,11 +36,35 @@ pub fn normalize_path(path: &Path) -> PathBuf {
 
 /// Check if a path is within a given root directory (sandbox check).
 ///
+/// Uses `canonicalize` when the path exists (resolves symlinks) and
+/// falls back to lexical normalization for paths that don't exist yet.
 /// Returns true if `path` is a descendant of (or equal to) `root`.
 pub fn is_within(path: &Path, root: &Path) -> bool {
-    let normalized_path = normalize_path(path);
-    let normalized_root = normalize_path(root);
-    normalized_path.starts_with(&normalized_root)
+    // Resolve root (should always exist)
+    let resolved_root = root.canonicalize().unwrap_or_else(|_| normalize_path(root));
+
+    if path.exists() {
+        // Path exists: resolve symlinks
+        match path.canonicalize() {
+            Ok(resolved) => resolved.starts_with(&resolved_root),
+            Err(_) => false,
+        }
+    } else {
+        // Path doesn't exist (e.g. write): check parent directory + lexical check
+        if let Some(parent) = path.parent() {
+            if parent.exists() {
+                match parent.canonicalize() {
+                    Ok(resolved_parent) => resolved_parent.starts_with(&resolved_root),
+                    Err(_) => false,
+                }
+            } else {
+                // Parent doesn't exist either — fall back to lexical check
+                normalize_path(path).starts_with(&resolved_root)
+            }
+        } else {
+            false
+        }
+    }
 }
 
 /// Check if a file looks like a binary based on its extension.

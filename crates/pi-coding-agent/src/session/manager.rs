@@ -23,6 +23,23 @@ impl SessionManager {
         paths::sessions_dir(&self.base_dir)
     }
 
+    /// Validate that a session ID is safe (no path traversal).
+    fn validate_session_id(session_id: &str) -> Result<(), CodingAgentError> {
+        if session_id.is_empty() {
+            return Err(CodingAgentError::Session("Session ID cannot be empty".to_string()));
+        }
+        // Only allow UUID-safe characters: alphanumeric, hyphen, underscore
+        if !session_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err(CodingAgentError::Session(format!(
+                "Invalid session ID: {session_id} (only [a-zA-Z0-9_-] allowed)"
+            )));
+        }
+        Ok(())
+    }
+
     /// Get path for a session file.
     fn session_path(&self, session_id: &str) -> PathBuf {
         self.sessions_dir().join(format!("{session_id}.jsonl"))
@@ -34,6 +51,7 @@ impl SessionManager {
         session_id: &str,
         title: Option<&str>,
     ) -> Result<SessionHeader, CodingAgentError> {
+        Self::validate_session_id(session_id)?;
         let dir = self.sessions_dir();
         paths::ensure_dir(&dir)?;
 
@@ -59,6 +77,7 @@ impl SessionManager {
         &self,
         session_id: &str,
     ) -> Result<(SessionHeader, Vec<SessionEntry>), CodingAgentError> {
+        Self::validate_session_id(session_id)?;
         let path = self.session_path(session_id);
         if !path.exists() {
             return Err(CodingAgentError::Session(format!(
@@ -100,6 +119,7 @@ impl SessionManager {
         session_id: &str,
         entry: &SessionEntry,
     ) -> Result<(), CodingAgentError> {
+        Self::validate_session_id(session_id)?;
         let path = self.session_path(session_id);
         if !path.exists() {
             return Err(CodingAgentError::Session(format!(
@@ -120,6 +140,7 @@ impl SessionManager {
         session_id: &str,
         entries: &[SessionEntry],
     ) -> Result<(), CodingAgentError> {
+        Self::validate_session_id(session_id)?;
         let path = self.session_path(session_id);
         if !path.exists() {
             return Err(CodingAgentError::Session(format!(
@@ -155,6 +176,7 @@ impl SessionManager {
         source_entry_id: &str,
         new_session_id: &str,
     ) -> Result<(SessionHeader, Vec<SessionEntry>), CodingAgentError> {
+        Self::validate_session_id(new_session_id)?;
         let (source_header, source_entries) = self.open(source_session_id)?;
 
         // Validate that the entry_id exists
@@ -257,11 +279,12 @@ impl SessionManager {
 
     /// Check if a session exists.
     pub fn exists(&self, session_id: &str) -> bool {
-        self.session_path(session_id).exists()
+        Self::validate_session_id(session_id).is_ok() && self.session_path(session_id).exists()
     }
 
     /// Delete a session file.
     pub fn delete(&self, session_id: &str) -> Result<(), CodingAgentError> {
+        Self::validate_session_id(session_id)?;
         let path = self.session_path(session_id);
         if path.exists() {
             std::fs::remove_file(&path)?;

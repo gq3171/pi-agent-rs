@@ -197,10 +197,15 @@ impl AgentSession {
             self.system_prompt.clone()
         };
 
+        // Validate model before any side effects (persist, turn count, etc.)
+        let model = self.model.clone().ok_or_else(|| {
+            CodingAgentError::Model("No model set for agent session".to_string())
+        })?;
+
         // Build user message (do NOT push to self.messages yet — agent_loop will add it)
         let user_msg = AgentMessage::user(text);
 
-        // Persist user entry
+        // Persist user entry (after validation passes)
         if let Some(session_id) = &self.session_id {
             let entry = SessionEntry::User {
                 id: SessionEntry::new_id(),
@@ -214,10 +219,6 @@ impl AgentSession {
         }
 
         self.turn_count += 1;
-
-        let model = self.model.clone().ok_or_else(|| {
-            CodingAgentError::Model("No model set for agent session".to_string())
-        })?;
 
         let context = AgentContext {
             system_prompt,
