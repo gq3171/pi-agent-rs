@@ -74,6 +74,12 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
         }
     }
 
+    /// Check if the stream is marked as done.
+    pub fn is_done(&self) -> bool {
+        let inner = self.inner.lock().unwrap();
+        inner.done
+    }
+
     /// End the stream with an optional result.
     /// If result is None, the stream is marked as done but no result is sent
     /// (matching TS behavior where `end()` can be called without arguments).
@@ -84,6 +90,9 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
             if let Some(sender) = inner.result_sender.take() {
                 let _ = sender.send(r);
             }
+        } else {
+            // Drop the sender so result() returns None instead of hanging
+            inner.result_sender.take();
         }
         // Wake all waiters
         for waker in inner.waiters.drain(..) {
@@ -91,15 +100,18 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
         }
     }
 
-    pub async fn result(&self) -> R {
+    /// Get the final result of the stream.
+    ///
+    /// Returns `None` if:
+    /// - `end(None)` was called (stream ended without a result)
+    /// - `result()` was already called once (receiver consumed)
+    /// - The result sender was dropped without sending
+    pub async fn result(&self) -> Option<R> {
         let mut guard = self.result_receiver.lock().await;
         if let Some(rx) = guard.take() {
-            match rx.await {
-                Ok(result) => result,
-                Err(_) => panic!("EventStream result sender dropped without sending"),
-            }
+            rx.await.ok()
         } else {
-            panic!("EventStream result() called more than once");
+            None
         }
     }
 }
@@ -207,8 +219,37 @@ mod tests {
             });
         });
 
-        let result = stream.result().await;
+        let result = stream.result().await.expect("result should exist");
         assert_eq!(result.model, "test");
+    }
+
+    #[tokio::test]
+    async fn test_result_returns_none_on_end_without_result() {
+        let stream: EventStream<AssistantMessageEvent, AssistantMessage> = EventStream::new(
+            |event: &AssistantMessageEvent| event.is_complete(),
+            |event: &AssistantMessageEvent| match event {
+                AssistantMessageEvent::Done { message, .. } => message.clone(),
+                AssistantMessageEvent::Error { error, .. } => error.clone(),
+                _ => panic!("unexpected"),
+            },
+        );
+
+        stream.end(None);
+        assert!(stream.result().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_result_returns_none_on_double_call() {
+        let stream = create_assistant_message_event_stream();
+        let msg = make_test_assistant_message();
+
+        stream.push(AssistantMessageEvent::Done {
+            reason: StopReason::Stop,
+            message: msg,
+        });
+
+        assert!(stream.result().await.is_some());
+        assert!(stream.result().await.is_none());
     }
 
     #[tokio::test]
@@ -259,7 +300,7 @@ mod tests {
         // Only the Start event should be yielded (end doesn't push events)
         assert_eq!(count, 1);
 
-        let result = stream.result().await;
+        let result = stream.result().await.expect("result should exist");
         assert_eq!(result.model, "test");
     }
 }

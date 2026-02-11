@@ -167,6 +167,13 @@ impl AgentSession {
         text: &str,
         options: PromptOptions,
     ) -> Result<(), CodingAgentError> {
+        // Validate stream_fn is configured before starting
+        if self.stream_fn.is_none() {
+            return Err(CodingAgentError::Config(
+                "No stream function configured. Call set_stream_fn() before prompt().".to_string(),
+            ));
+        }
+
         // Ensure we have a session
         if self.session_id.is_none() {
             let session_id = uuid::Uuid::new_v4().to_string();
@@ -190,9 +197,8 @@ impl AgentSession {
             self.system_prompt.clone()
         };
 
-        // Add user message
+        // Build user message (do NOT push to self.messages yet — agent_loop will add it)
         let user_msg = AgentMessage::user(text);
-        self.messages.push(user_msg.clone());
 
         // Persist user entry
         if let Some(session_id) = &self.session_id {
@@ -202,12 +208,13 @@ impl AgentSession {
                 timestamp: chrono::Utc::now().timestamp_millis(),
                 content: text.to_string(),
             };
-            let _ = self.session_manager.append_entry(session_id, &entry);
+            if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
+                tracing::warn!("Failed to persist user entry: {e}");
+            }
         }
 
         self.turn_count += 1;
 
-        // Run the agent loop if a stream function is configured
         let model = self.model.clone().ok_or_else(|| {
             CodingAgentError::Model("No model set for agent session".to_string())
         })?;
@@ -257,7 +264,7 @@ impl AgentSession {
         while let Some(event) = pinned.next().await {
             // Persist assistant entries on message end
             if let AgentEvent::MessageEnd {
-                message: ref message @ AgentMessage::Llm(Message::Assistant(ref assistant_msg)),
+                message: AgentMessage::Llm(Message::Assistant(ref assistant_msg)),
             } = event
             {
                 if let Some(session_id) = &self.session_id {
@@ -269,17 +276,35 @@ impl AgentSession {
                         timestamp: chrono::Utc::now().timestamp_millis(),
                         message: message_value,
                     };
-                    let _ = self.session_manager.append_entry(session_id, &entry);
+                    if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
+                        tracing::warn!("Failed to persist assistant entry: {e}");
+                    }
                 }
-                let _ = message; // suppress unused binding warning
             }
 
             self.emit(AgentSessionEvent::Agent(event));
         }
 
         // Get the final messages from the agent loop result
-        let final_messages = event_stream.result().await;
-        self.messages = final_messages;
+        // agent_loop returns only the NEW messages (prompts + responses)
+        match event_stream.result().await {
+            Some(new_messages) => {
+                self.messages.extend(new_messages);
+                if let Some(session_id) = &self.session_id {
+                    self.emit(AgentSessionEvent::SessionEnd {
+                        session_id: session_id.clone(),
+                        messages: self.messages.clone(),
+                    });
+                }
+            }
+            None => {
+                let err_msg = "Agent loop ended without producing a result".to_string();
+                self.emit(AgentSessionEvent::Error {
+                    message: err_msg.clone(),
+                });
+                return Err(CodingAgentError::Agent(err_msg));
+            }
+        }
 
         Ok(())
     }
@@ -370,7 +395,9 @@ impl AgentSession {
                 summary,
                 summarized_ids: Vec::new(),
             };
-            let _ = self.session_manager.append_entry(session_id, &entry);
+            if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
+                tracing::warn!("Failed to persist compaction summary: {e}");
+            }
         }
 
         Ok(result)

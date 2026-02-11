@@ -43,7 +43,9 @@ pub async fn complete(
     cancel: CancellationToken,
 ) -> Result<AssistantMessage, String> {
     let s = stream(model, context, options, registry, cancel)?;
-    Ok(s.result().await)
+    s.result()
+        .await
+        .ok_or_else(|| "Stream ended without producing a result".to_string())
 }
 
 /// Complete with simplified options.
@@ -55,5 +57,7 @@ pub async fn complete_simple(
     cancel: CancellationToken,
 ) -> Result<AssistantMessage, String> {
     let s = stream_simple(model, context, options, registry, cancel)?;
-    Ok(s.result().await)
+    s.result()
+        .await
+        .ok_or_else(|| "Stream ended without producing a result".to_string())
 }

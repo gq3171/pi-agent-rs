@@ -30,7 +30,9 @@ impl Default for GoogleGeminiCliOAuthConfig {
 }
 
 /// Start the Google Gemini CLI OAuth flow.
-pub fn start_google_gemini_cli_oauth(config: &GoogleGeminiCliOAuthConfig) -> OAuthFlowStart {
+pub fn start_google_gemini_cli_oauth(
+    config: &GoogleGeminiCliOAuthConfig,
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
     build_authorization_url(
         &config.auth_url,
         &config.client_id,

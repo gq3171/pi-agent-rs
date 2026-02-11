@@ -37,7 +37,9 @@ impl Default for AnthropicOAuthConfig {
 /// 2. Receive the callback with `code` and `state`
 /// 3. Verify `state` matches the returned state
 /// 4. Call `exchange_anthropic_code()` with the code and `pkce.code_verifier`
-pub fn start_anthropic_oauth(config: &AnthropicOAuthConfig) -> OAuthFlowStart {
+pub fn start_anthropic_oauth(
+    config: &AnthropicOAuthConfig,
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
     build_authorization_url(
         &config.auth_url,
         &config.client_id,

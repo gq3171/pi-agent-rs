@@ -30,7 +30,9 @@ impl Default for GithubCopilotOAuthConfig {
 }
 
 /// Start the GitHub Copilot OAuth flow.
-pub fn start_github_copilot_oauth(config: &GithubCopilotOAuthConfig) -> OAuthFlowStart {
+pub fn start_github_copilot_oauth(
+    config: &GithubCopilotOAuthConfig,
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
     build_authorization_url(
         &config.auth_url,
         &config.client_id,

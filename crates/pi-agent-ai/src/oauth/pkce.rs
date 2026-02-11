@@ -14,36 +14,30 @@ pub struct PkceChallenge {
 
 impl PkceChallenge {
     /// Generate a new PKCE challenge pair using cryptographic randomness.
-    pub fn new() -> Self {
-        let code_verifier = generate_verifier();
+    pub fn new() -> Result<Self, getrandom::Error> {
+        let code_verifier = generate_verifier()?;
         let code_challenge = generate_challenge(&code_verifier);
-        Self {
+        Ok(Self {
             code_verifier,
             code_challenge,
             code_challenge_method: "S256".to_string(),
-        }
-    }
-}
-
-impl Default for PkceChallenge {
-    fn default() -> Self {
-        Self::new()
+        })
     }
 }
 
 /// Generate a cryptographically random state parameter for CSRF protection.
-pub fn generate_state() -> String {
+pub fn generate_state() -> Result<String, getrandom::Error> {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("getrandom failed");
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    getrandom::fill(&mut bytes)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 /// Generate a random code verifier (43-128 characters, URL-safe)
 /// using cryptographic randomness.
-fn generate_verifier() -> String {
+fn generate_verifier() -> Result<String, getrandom::Error> {
     let mut bytes = [0u8; 32];
-    getrandom::fill(&mut bytes).expect("getrandom failed");
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+    getrandom::fill(&mut bytes)?;
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
 }
 
 /// Generate the code challenge from a code verifier (SHA256 + base64url).
@@ -88,9 +82,13 @@ pub fn build_authorization_url(
     redirect_uri: &str,
     scope: &str,
     extra_params: &[(&str, &str)],
-) -> OAuthFlowStart {
-    let pkce = PkceChallenge::new();
-    let state = generate_state();
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
+    let pkce = PkceChallenge::new().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+        format!("PKCE generation failed: {e}").into()
+    })?;
+    let state = generate_state().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+        format!("State generation failed: {e}").into()
+    })?;
 
     let mut url = format!(
         "{}?client_id={}&redirect_uri={}&response_type=code&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
@@ -106,11 +104,11 @@ pub fn build_authorization_url(
         url.push_str(&format!("&{}={}", url_encode(key), url_encode(value)));
     }
 
-    OAuthFlowStart {
+    Ok(OAuthFlowStart {
         auth_url: url,
         pkce,
         state,
-    }
+    })
 }
 
 /// Exchange an authorization code for tokens (generic for all providers).
@@ -159,7 +157,7 @@ mod tests {
 
     #[test]
     fn test_pkce_challenge_generation() {
-        let pkce = PkceChallenge::new();
+        let pkce = PkceChallenge::new().unwrap();
         assert!(!pkce.code_verifier.is_empty());
         assert!(!pkce.code_challenge.is_empty());
         assert_eq!(pkce.code_challenge_method, "S256");
@@ -168,8 +166,8 @@ mod tests {
 
     #[test]
     fn test_pkce_uniqueness() {
-        let a = PkceChallenge::new();
-        let b = PkceChallenge::new();
+        let a = PkceChallenge::new().unwrap();
+        let b = PkceChallenge::new().unwrap();
         assert_ne!(a.code_verifier, b.code_verifier);
     }
 
@@ -183,8 +181,8 @@ mod tests {
 
     #[test]
     fn test_generate_state_uniqueness() {
-        let s1 = generate_state();
-        let s2 = generate_state();
+        let s1 = generate_state().unwrap();
+        let s2 = generate_state().unwrap();
         assert_ne!(s1, s2);
         assert!(!s1.is_empty());
     }
@@ -205,7 +203,8 @@ mod tests {
             "http://localhost:8080/callback",
             "read write",
             &[],
-        );
+        )
+        .unwrap();
         assert!(flow.auth_url.starts_with("https://auth.example.com/authorize?"));
         assert!(flow.auth_url.contains("client_id=my-client"));
         assert!(flow.auth_url.contains("response_type=code"));
@@ -223,7 +222,8 @@ mod tests {
             "http://localhost:8080/callback",
             "read",
             &[("access_type", "offline"), ("prompt", "consent")],
-        );
+        )
+        .unwrap();
         assert!(flow.auth_url.contains("access_type=offline"));
         assert!(flow.auth_url.contains("prompt=consent"));
     }

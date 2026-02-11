@@ -49,13 +49,18 @@ impl BashOperations for DefaultBashExecutor {
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_millis(timeout_ms.unwrap_or(120_000));
 
-        let child = Command::new("bash")
-            .arg("-c")
+        let mut cmd = Command::new("bash");
+        cmd.arg("-c")
             .arg(command)
             .current_dir(working_dir)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .spawn()?;
+            .stderr(std::process::Stdio::piped());
+
+        // Create a new process group so we can kill all child processes
+        #[cfg(unix)]
+        cmd.process_group(0);
+
+        let child = cmd.spawn()?;
 
         let child_id = child.id();
         let wait_fut = child.wait_with_output();

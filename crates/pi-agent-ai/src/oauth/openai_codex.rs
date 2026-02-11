@@ -30,7 +30,9 @@ impl Default for OpenAICodexOAuthConfig {
 }
 
 /// Start the OpenAI Codex OAuth flow.
-pub fn start_openai_codex_oauth(config: &OpenAICodexOAuthConfig) -> OAuthFlowStart {
+pub fn start_openai_codex_oauth(
+    config: &OpenAICodexOAuthConfig,
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
     build_authorization_url(
         &config.auth_url,
         &config.client_id,

@@ -119,7 +119,26 @@ impl AgentTool for WriteTool {
             .ok_or("Missing 'content' parameter")?;
 
         let resolved = path_utils::resolve_path(file_path, &self.working_dir);
-        let output = self.writer.write_file(&resolved, content)?;
+
+        // Security: verify path is within working directory
+        if !path_utils::is_within(&resolved, &self.working_dir) {
+            return Err(format!(
+                "Access denied: {} is outside the working directory",
+                resolved.display()
+            )
+            .into());
+        }
+
+        let writer = self.writer.clone();
+        let resolved_clone = resolved.clone();
+        let content = content.to_string();
+        let output = tokio::task::spawn_blocking(move || {
+            writer.write_file(&resolved_clone, &content)
+        })
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("Task join error: {e}").into()
+        })??;
 
         let action = if output.created { "Created" } else { "Updated" };
         let text = format!(

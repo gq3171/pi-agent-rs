@@ -172,9 +172,27 @@ impl AgentTool for EditTool {
             .unwrap_or(false);
 
         let resolved = path_utils::resolve_path(file_path, &self.working_dir);
-        let output = self
-            .editor
-            .edit_file(&resolved, old_string, new_string, replace_all)?;
+
+        // Security: verify path is within working directory
+        if !path_utils::is_within(&resolved, &self.working_dir) {
+            return Err(format!(
+                "Access denied: {} is outside the working directory",
+                resolved.display()
+            )
+            .into());
+        }
+
+        let editor = self.editor.clone();
+        let resolved_clone = resolved.clone();
+        let old_string = old_string.to_string();
+        let new_string = new_string.to_string();
+        let output = tokio::task::spawn_blocking(move || {
+            editor.edit_file(&resolved_clone, &old_string, &new_string, replace_all)
+        })
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("Task join error: {e}").into()
+        })??;
 
         let text = format!(
             "Replaced {} occurrence(s) in {}\n\n{}",

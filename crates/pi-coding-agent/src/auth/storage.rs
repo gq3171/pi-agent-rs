@@ -38,18 +38,17 @@ impl AuthStorage {
     /// Create a new AuthStorage with a base directory.
     pub fn new(base_dir: &Path) -> Self {
         let mut env_mappings = HashMap::new();
-        // Standard env var mappings for providers
+        // Standard env var mappings — synced with pi-agent-ai/src/env_keys.rs
         env_mappings.insert("anthropic".to_string(), "ANTHROPIC_API_KEY".to_string());
         env_mappings.insert("openai".to_string(), "OPENAI_API_KEY".to_string());
-        env_mappings.insert("google".to_string(), "GOOGLE_API_KEY".to_string());
+        env_mappings.insert("google".to_string(), "GEMINI_API_KEY".to_string());
         env_mappings.insert(
             "google-gemini-cli".to_string(),
-            "GOOGLE_API_KEY".to_string(),
+            "GEMINI_API_KEY".to_string(),
         );
-        env_mappings.insert("google-vertex".to_string(), "GOOGLE_API_KEY".to_string());
         env_mappings.insert(
             "google-antigravity".to_string(),
-            "GOOGLE_API_KEY".to_string(),
+            "GEMINI_API_KEY".to_string(),
         );
         env_mappings.insert(
             "amazon-bedrock".to_string(),
@@ -59,11 +58,17 @@ impl AuthStorage {
         env_mappings.insert("groq".to_string(), "GROQ_API_KEY".to_string());
         env_mappings.insert(
             "github-copilot".to_string(),
-            "GITHUB_COPILOT_TOKEN".to_string(),
+            "GITHUB_TOKEN".to_string(),
         );
         env_mappings.insert("openai-codex".to_string(), "OPENAI_API_KEY".to_string());
         env_mappings.insert("mistral".to_string(), "MISTRAL_API_KEY".to_string());
         env_mappings.insert("openrouter".to_string(), "OPENROUTER_API_KEY".to_string());
+        env_mappings.insert(
+            "azure-openai-responses".to_string(),
+            "AZURE_OPENAI_API_KEY".to_string(),
+        );
+        env_mappings.insert("cerebras".to_string(), "CEREBRAS_API_KEY".to_string());
+        env_mappings.insert("huggingface".to_string(), "HF_TOKEN".to_string());
 
         Self {
             base_dir: base_dir.to_path_buf(),

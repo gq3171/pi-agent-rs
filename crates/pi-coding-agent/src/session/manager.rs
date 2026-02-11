@@ -157,6 +157,14 @@ impl SessionManager {
     ) -> Result<(SessionHeader, Vec<SessionEntry>), CodingAgentError> {
         let (source_header, source_entries) = self.open(source_session_id)?;
 
+        // Validate that the entry_id exists
+        let entry_exists = source_entries.iter().any(|e| e.id() == source_entry_id);
+        if !entry_exists {
+            return Err(CodingAgentError::Session(format!(
+                "Entry not found: {source_entry_id} in session {source_session_id}"
+            )));
+        }
+
         // Collect entries up to and including the fork point
         let mut forked_entries = Vec::new();
         for entry in &source_entries {

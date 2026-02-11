@@ -19,7 +19,10 @@ pub struct ModelRegistry {
 impl ModelRegistry {
     /// Create a new registry with built-in models.
     pub fn new() -> Self {
-        let builtin_models = Self::load_builtin_models();
+        let mut builtin_models = Self::load_builtin_models();
+        // Sort for deterministic ordering (default_model returns first)
+        builtin_models.sort_by(|a, b| a.id.cmp(&b.id));
+
         let mut builtin = HashMap::new();
         for model in &builtin_models {
             let key = format!("{}/{}", model.provider, model.id);

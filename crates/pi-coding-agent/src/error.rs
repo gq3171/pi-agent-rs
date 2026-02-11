@@ -26,6 +26,9 @@ pub enum CodingAgentError {
     #[error("Compaction error: {0}")]
     Compaction(String),
 
+    #[error("Agent error: {0}")]
+    Agent(String),
+
     #[error("{0}")]
     Other(String),
 }

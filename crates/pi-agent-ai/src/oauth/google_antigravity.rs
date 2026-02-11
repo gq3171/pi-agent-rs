@@ -30,7 +30,9 @@ impl Default for GoogleAntigravityOAuthConfig {
 }
 
 /// Start the Google Antigravity OAuth flow.
-pub fn start_google_antigravity_oauth(config: &GoogleAntigravityOAuthConfig) -> OAuthFlowStart {
+pub fn start_google_antigravity_oauth(
+    config: &GoogleAntigravityOAuthConfig,
+) -> Result<OAuthFlowStart, Box<dyn std::error::Error + Send + Sync>> {
     build_authorization_url(
         &config.auth_url,
         &config.client_id,

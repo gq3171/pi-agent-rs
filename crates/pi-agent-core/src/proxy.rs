@@ -187,6 +187,17 @@ pub fn stream_proxy(
                 }
             }
         }
+
+        // If the byte stream ended without a Done/Error event, emit an error
+        if !stream_clone.is_done() {
+            partial.stop_reason = StopReason::Error;
+            partial.error_message =
+                Some("Stream ended unexpectedly without completion event".to_string());
+            stream_clone.push(AssistantMessageEvent::Error {
+                reason: StopReason::Error,
+                error: partial,
+            });
+        }
     });
 
     stream

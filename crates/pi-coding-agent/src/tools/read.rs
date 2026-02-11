@@ -183,7 +183,25 @@ impl AgentTool for ReadTool {
         let limit = params.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
 
         let resolved = path_utils::resolve_path(file_path, &self.working_dir);
-        let output = self.reader.read_file(&resolved, offset, limit)?;
+
+        // Security: verify path is within working directory
+        if !path_utils::is_within(&resolved, &self.working_dir) {
+            return Err(format!(
+                "Access denied: {} is outside the working directory",
+                resolved.display()
+            )
+            .into());
+        }
+
+        let reader = self.reader.clone();
+        let resolved_clone = resolved.clone();
+        let output = tokio::task::spawn_blocking(move || {
+            reader.read_file(&resolved_clone, offset, limit)
+        })
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("Task join error: {e}").into()
+        })??;
 
         if output.is_image {
             if let (Some(data), Some(mime)) = (output.image_data, output.mime_type) {

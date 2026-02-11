@@ -179,6 +179,25 @@ pub fn transform_messages(
         }
     }
 
+    // Flush any remaining pending tool calls at end of message list
+    if !pending_tool_calls.is_empty() {
+        for tc in &pending_tool_calls {
+            if !existing_tool_result_ids.contains(&tc.id) {
+                result.push(Message::ToolResult(ToolResultMessage {
+                    tool_call_id: tc.id.clone(),
+                    tool_name: tc.name.clone(),
+                    content: vec![ContentBlock::Text(TextContent {
+                        text: "No result provided".to_string(),
+                        text_signature: None,
+                    })],
+                    details: None,
+                    is_error: true,
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                }));
+            }
+        }
+    }
+
     result
 }
 
