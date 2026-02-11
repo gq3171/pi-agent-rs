@@ -43,9 +43,12 @@ pub fn validate_tool_arguments(tool: &Tool, tool_call: &ToolCall) -> Result<Valu
             }
         }
         Err(e) => {
-            // Schema compilation failed - log but allow through
-            tracing::warn!("Failed to compile JSON schema for tool {}: {}", tool.name, e);
-            Ok(tool_call.arguments.clone())
+            // Schema compilation failed - fail closed to prevent unvalidated input
+            tracing::error!("Failed to compile JSON schema for tool {}: {}", tool.name, e);
+            Err(format!(
+                "Internal error: schema compilation failed for tool \"{}\": {}",
+                tool.name, e
+            ))
         }
     }
 }

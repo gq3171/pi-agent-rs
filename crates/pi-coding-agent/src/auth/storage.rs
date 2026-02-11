@@ -215,9 +215,11 @@ impl AuthStorage {
     }
 
     /// Write content to a file atomically via uniquely-named temp file + rename.
-    /// On Unix, also restricts permissions to owner-only (0600); failure to set
-    /// permissions aborts the write to prevent leaking credentials.
+    /// On Unix, the temp file is created with 0600 permissions from the start to
+    /// prevent any window where credentials are world-readable.
     fn atomic_write(path: &Path, content: &str) -> Result<(), CodingAgentError> {
+        use std::io::Write;
+
         let unique = uuid::Uuid::new_v4();
         let tmp_name = format!(
             ".{}.{}.tmp",
@@ -227,24 +229,36 @@ impl AuthStorage {
             unique
         );
         let tmp_path = path.with_file_name(tmp_name);
-        std::fs::write(&tmp_path, content)?;
 
-        #[cfg(unix)]
+        // Create the file with restrictive permissions from the start
         {
-            use std::os::unix::fs::PermissionsExt;
-            if let Err(e) =
-                std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
-            {
-                // Clean up temp file and abort — do not leave world-readable credentials
+            #[cfg(unix)]
+            let mut file = {
+                use std::os::unix::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&tmp_path)?
+            };
+            #[cfg(not(unix))]
+            let mut file = {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&tmp_path)?
+            };
+
+            file.write_all(content.as_bytes()).map_err(|e| {
                 let _ = std::fs::remove_file(&tmp_path);
-                return Err(CodingAgentError::Io(std::io::Error::new(
-                    std::io::ErrorKind::PermissionDenied,
-                    format!("Failed to restrict permissions on temp file: {e}"),
-                )));
-            }
+                CodingAgentError::Io(e)
+            })?;
         }
 
-        std::fs::rename(&tmp_path, path)?;
+        std::fs::rename(&tmp_path, path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp_path);
+            CodingAgentError::Io(e)
+        })?;
         Ok(())
     }
 

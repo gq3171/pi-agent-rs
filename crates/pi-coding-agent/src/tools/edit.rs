@@ -46,6 +46,10 @@ impl EditOperations for DefaultFileEditor {
             return Err(format!("File not found: {}", path.display()).into());
         }
 
+        if old_string.is_empty() {
+            return Err("old_string must not be empty".into());
+        }
+
         let original_content = std::fs::read_to_string(path)?;
 
         if old_string == new_string {

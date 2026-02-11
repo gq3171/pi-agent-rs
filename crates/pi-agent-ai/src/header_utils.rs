@@ -10,22 +10,24 @@ const SENSITIVE_HEADERS: &[&str] = &[
 
 /// Check whether a header key is sensitive (case-insensitive).
 fn is_sensitive(key: &str) -> bool {
-    let lower = key.to_ascii_lowercase();
-    SENSITIVE_HEADERS.iter().any(|&h| h == lower)
+    SENSITIVE_HEADERS
+        .iter()
+        .any(|&h| key.eq_ignore_ascii_case(h))
+}
+
+/// Check whether `target` already contains a key matching `key` case-insensitively.
+fn has_key_ignore_case(target: &HashMap<String, String>, key: &str) -> bool {
+    target
+        .keys()
+        .any(|existing| existing.eq_ignore_ascii_case(key))
 }
 
 /// Merge `source` headers into `target`, skipping any sensitive keys
-/// that are already present in `target`.
+/// that are already present in `target` (case-insensitive match).
 pub fn merge_headers_safe(target: &mut HashMap<String, String>, source: &HashMap<String, String>) {
     for (k, v) in source {
-        if is_sensitive(k) && target.contains_key(&k.to_ascii_lowercase()) {
-            // Also check with the original casing since HashMap is case-sensitive
-            let dominated = target.keys().any(|existing| {
-                existing.to_ascii_lowercase() == k.to_ascii_lowercase()
-            });
-            if dominated {
-                continue;
-            }
+        if is_sensitive(k) && has_key_ignore_case(target, k) {
+            continue;
         }
         target.insert(k.clone(), v.clone());
     }
@@ -48,6 +50,7 @@ mod tests {
         merge_headers_safe(&mut headers, &extra);
 
         assert_eq!(headers.get("authorization").unwrap(), "Bearer secret");
+        assert!(!headers.contains_key("Authorization"));
         assert_eq!(headers.get("x-custom").unwrap(), "allowed");
     }
 
@@ -62,6 +65,35 @@ mod tests {
         merge_headers_safe(&mut headers, &extra);
 
         assert_eq!(headers.get("x-api-key").unwrap(), "real-key");
+    }
+
+    #[test]
+    fn test_merge_headers_safe_blocks_mixed_case() {
+        // Target has "Authorization" (capitalized), source tries "authorization" (lowercase)
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".to_string(), "Bearer real".to_string());
+
+        let mut extra = HashMap::new();
+        extra.insert("authorization".to_string(), "Bearer fake".to_string());
+
+        merge_headers_safe(&mut headers, &extra);
+
+        assert_eq!(headers.get("Authorization").unwrap(), "Bearer real");
+        assert!(!headers.contains_key("authorization"));
+    }
+
+    #[test]
+    fn test_merge_headers_safe_blocks_api_key_mixed_case() {
+        let mut headers = HashMap::new();
+        headers.insert("api-key".to_string(), "real-key".to_string());
+
+        let mut extra = HashMap::new();
+        extra.insert("Api-Key".to_string(), "fake-key".to_string());
+
+        merge_headers_safe(&mut headers, &extra);
+
+        assert_eq!(headers.get("api-key").unwrap(), "real-key");
+        assert!(!headers.contains_key("Api-Key"));
     }
 
     #[test]

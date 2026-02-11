@@ -49,6 +49,7 @@ impl SettingsManager {
     }
 
     /// Save current settings to settings.json atomically (temp file + rename).
+    /// On Unix, restricts permissions to owner-only (0600) since settings may contain API keys.
     pub fn save(&self) -> Result<(), CodingAgentError> {
         let path = paths::settings_file(&self.base_dir);
         paths::ensure_dir(&self.base_dir)?;
@@ -57,14 +58,38 @@ impl SettingsManager {
         // Write to a unique temp file then rename for crash safety
         let unique = uuid::Uuid::new_v4();
         let tmp_path = path.with_file_name(format!(".settings.{unique}.tmp"));
-        std::fs::write(&tmp_path, &content).map_err(|e| {
-            CodingAgentError::Io(std::io::Error::new(
-                e.kind(),
-                format!("Failed to write temp settings file: {e}"),
-            ))
-        })?;
+
+        // Create with restrictive permissions from the start
+        {
+            use std::io::Write;
+            let mut file = std::fs::File::create(&tmp_path).map_err(|e| {
+                CodingAgentError::Io(std::io::Error::new(
+                    e.kind(),
+                    format!("Failed to create temp settings file: {e}"),
+                ))
+            })?;
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if let Err(e) = file
+                    .set_permissions(std::fs::Permissions::from_mode(0o600))
+                {
+                    let _ = std::fs::remove_file(&tmp_path);
+                    return Err(CodingAgentError::Io(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        format!("Failed to restrict permissions on temp settings file: {e}"),
+                    )));
+                }
+            }
+
+            file.write_all(content.as_bytes()).map_err(|e| {
+                let _ = std::fs::remove_file(&tmp_path);
+                CodingAgentError::Io(e)
+            })?;
+        }
+
         std::fs::rename(&tmp_path, &path).map_err(|e| {
-            // Clean up temp file on rename failure
             let _ = std::fs::remove_file(&tmp_path);
             CodingAgentError::Io(e)
         })?;

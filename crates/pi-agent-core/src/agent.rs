@@ -4,7 +4,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 
 use crate::agent_loop::{agent_loop, agent_loop_continue};
@@ -94,8 +93,7 @@ pub struct Agent {
     >,
     thinking_budgets: Option<ThinkingBudgets>,
     max_retry_delay_ms: Option<u64>,
-    running_notify: Arc<Notify>,
-    is_running: bool,
+    running_watch: tokio::sync::watch::Sender<bool>,
 }
 
 impl Agent {
@@ -170,8 +168,7 @@ impl Agent {
             get_api_key: opts.get_api_key,
             thinking_budgets: opts.thinking_budgets,
             max_retry_delay_ms: opts.max_retry_delay_ms,
-            running_notify: Arc::new(Notify::new()),
-            is_running: false,
+            running_watch: tokio::sync::watch::Sender::new(false),
         }
     }
 
@@ -330,8 +327,12 @@ impl Agent {
     }
 
     pub async fn wait_for_idle(&self) {
-        if self.is_running {
-            self.running_notify.notified().await;
+        let mut rx = self.running_watch.subscribe();
+        // Loop: re-check after each change to avoid lost wakeups
+        while *rx.borrow() {
+            if rx.changed().await.is_err() {
+                break; // Sender dropped
+            }
         }
     }
 
@@ -405,7 +406,7 @@ impl Agent {
         self.state.is_streaming = true;
         self.state.stream_message = None;
         self.state.error = None;
-        self.is_running = true;
+        let _ = self.running_watch.send(true);
 
         let reasoning = self.state.thinking_level.to_thinking_level();
 
@@ -592,13 +593,11 @@ impl Agent {
         self.state.stream_message = None;
         self.state.pending_tool_calls.clear();
         self.cancel_token = None;
-        self.is_running = false;
-
         // Sync queues back
         self.steering_queue = steering_queue.lock().unwrap().clone();
         self.follow_up_queue = follow_up_queue.lock().unwrap().clone();
 
-        self.running_notify.notify_waiters();
+        let _ = self.running_watch.send(false);
     }
 
     fn emit(&self, event: &AgentEvent) {

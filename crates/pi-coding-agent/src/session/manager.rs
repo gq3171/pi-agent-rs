@@ -5,6 +5,20 @@ use crate::config::paths;
 use crate::error::CodingAgentError;
 use crate::session::types::*;
 
+/// Create a new file with restrictive permissions on Unix (0600).
+fn create_new_restricted(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+
+    opts.open(path)
+}
+
 /// Manages session files in JSONL format.
 pub struct SessionManager {
     base_dir: PathBuf,
@@ -65,19 +79,15 @@ impl SessionManager {
         };
 
         let path = self.session_path(session_id);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    CodingAgentError::Session(format!(
-                        "Session already exists: {session_id}"
-                    ))
-                } else {
-                    CodingAgentError::Io(e)
-                }
-            })?;
+        let mut file = create_new_restricted(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                CodingAgentError::Session(format!(
+                    "Session already exists: {session_id}"
+                ))
+            } else {
+                CodingAgentError::Io(e)
+            }
+        })?;
         let line = serde_json::to_string(&header)?;
         writeln!(file, "{line}")?;
 
@@ -222,20 +232,16 @@ impl SessionManager {
         };
 
         let path = self.session_path(new_session_id);
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    CodingAgentError::Session(format!(
-                        "Fork target session already exists: {}",
-                        new_session_id
-                    ))
-                } else {
-                    CodingAgentError::Io(e)
-                }
-            })?;
+        let mut file = create_new_restricted(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                CodingAgentError::Session(format!(
+                    "Fork target session already exists: {}",
+                    new_session_id
+                ))
+            } else {
+                CodingAgentError::Io(e)
+            }
+        })?;
         let header_line = serde_json::to_string(&header)?;
         writeln!(file, "{header_line}")?;
 
