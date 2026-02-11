@@ -531,18 +531,14 @@ fn build_headers(
         );
     }
 
-    // Merge model headers
+    // Merge model headers (skip sensitive auth headers)
     if let Some(model_headers) = &model.headers {
-        for (k, v) in model_headers {
-            headers.insert(k.clone(), v.clone());
-        }
+        crate::header_utils::merge_headers_safe(&mut headers, model_headers);
     }
 
-    // Merge extra headers
+    // Merge extra headers (skip sensitive auth headers)
     if let Some(extra) = extra_headers {
-        for (k, v) in extra {
-            headers.insert(k.clone(), v.clone());
-        }
+        crate::header_utils::merge_headers_safe(&mut headers, extra);
     }
 
     headers

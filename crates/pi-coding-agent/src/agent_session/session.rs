@@ -366,10 +366,15 @@ impl AgentSession {
             // Fallback: use structured context extraction (no LLM)
             let summary_context =
                 crate::compaction::branch_summary::generate_summary_context(&to_summarize);
-            format!(
-                "Conversation summary: {}",
-                &summary_context[..summary_context.len().min(500)]
-            )
+            // Truncate at a valid UTF-8 char boundary
+            let max_len = 500;
+            let end = summary_context
+                .char_indices()
+                .take_while(|&(i, _)| i <= max_len)
+                .last()
+                .map(|(i, c)| i + c.len_utf8())
+                .unwrap_or(0);
+            format!("Conversation summary: {}", &summary_context[..end])
         };
 
         self.messages = compaction::apply_compaction(&summary, to_keep);

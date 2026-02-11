@@ -861,7 +861,7 @@ async fn run_stream(
         req_headers.insert("anthropic-beta".to_string(), CLAUDE_THINKING_BETA_HEADER.to_string());
     }
     if let Some(extra) = &options.base.headers {
-        for (k, v) in extra { req_headers.insert(k.clone(), v.clone()); }
+        crate::header_utils::merge_headers_safe(&mut req_headers, extra);
     }
 
     let body_json = serde_json::to_string(&request_body).map_err(|e| format!("Serialize error: {e}"))?;

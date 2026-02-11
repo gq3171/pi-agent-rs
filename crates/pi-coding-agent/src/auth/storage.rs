@@ -214,16 +214,34 @@ impl AuthStorage {
         Ok(())
     }
 
-    /// Write content to a file atomically via temp file + rename.
-    /// On Unix, also restricts permissions to owner-only (0600).
+    /// Write content to a file atomically via uniquely-named temp file + rename.
+    /// On Unix, also restricts permissions to owner-only (0600); failure to set
+    /// permissions aborts the write to prevent leaking credentials.
     fn atomic_write(path: &Path, content: &str) -> Result<(), CodingAgentError> {
-        let tmp_path = path.with_extension("json.tmp");
+        let unique = uuid::Uuid::new_v4();
+        let tmp_name = format!(
+            ".{}.{}.tmp",
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("auth"),
+            unique
+        );
+        let tmp_path = path.with_file_name(tmp_name);
         std::fs::write(&tmp_path, content)?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600));
+            if let Err(e) =
+                std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600))
+            {
+                // Clean up temp file and abort — do not leave world-readable credentials
+                let _ = std::fs::remove_file(&tmp_path);
+                return Err(CodingAgentError::Io(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    format!("Failed to restrict permissions on temp file: {e}"),
+                )));
+            }
         }
 
         std::fs::rename(&tmp_path, path)?;

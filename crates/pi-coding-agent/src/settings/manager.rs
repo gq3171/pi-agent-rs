@@ -48,12 +48,26 @@ impl SettingsManager {
         Ok(&self.settings)
     }
 
-    /// Save current settings to settings.json.
+    /// Save current settings to settings.json atomically (temp file + rename).
     pub fn save(&self) -> Result<(), CodingAgentError> {
         let path = paths::settings_file(&self.base_dir);
         paths::ensure_dir(&self.base_dir)?;
         let content = serde_json::to_string_pretty(&self.settings)?;
-        std::fs::write(&path, content)?;
+
+        // Write to a unique temp file then rename for crash safety
+        let unique = uuid::Uuid::new_v4();
+        let tmp_path = path.with_file_name(format!(".settings.{unique}.tmp"));
+        std::fs::write(&tmp_path, &content).map_err(|e| {
+            CodingAgentError::Io(std::io::Error::new(
+                e.kind(),
+                format!("Failed to write temp settings file: {e}"),
+            ))
+        })?;
+        std::fs::rename(&tmp_path, &path).map_err(|e| {
+            // Clean up temp file on rename failure
+            let _ = std::fs::remove_file(&tmp_path);
+            CodingAgentError::Io(e)
+        })?;
         Ok(())
     }
 

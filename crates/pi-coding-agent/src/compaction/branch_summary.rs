@@ -46,7 +46,14 @@ pub fn generate_summary_context(messages: &[AgentMessage]) -> String {
                     .join("\n");
                 let status = if m.is_error { "error" } else { "success" };
                 let truncated = if content.len() > 500 {
-                    format!("{}...[truncated]", &content[..500])
+                    // Truncate at a valid UTF-8 char boundary
+                    let end = content
+                        .char_indices()
+                        .take_while(|&(i, _)| i <= 500)
+                        .last()
+                        .map(|(i, c)| i + c.len_utf8())
+                        .unwrap_or(0);
+                    format!("{}...[truncated]", &content[..end])
                 } else {
                     content
                 };

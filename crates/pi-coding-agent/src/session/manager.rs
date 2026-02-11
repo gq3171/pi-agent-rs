@@ -222,7 +222,20 @@ impl SessionManager {
         };
 
         let path = self.session_path(new_session_id);
-        let mut file = std::fs::File::create(&path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    CodingAgentError::Session(format!(
+                        "Fork target session already exists: {}",
+                        new_session_id
+                    ))
+                } else {
+                    CodingAgentError::Io(e)
+                }
+            })?;
         let header_line = serde_json::to_string(&header)?;
         writeln!(file, "{header_line}")?;
 
