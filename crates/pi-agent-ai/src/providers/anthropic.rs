@@ -649,7 +649,13 @@ pub fn stream_anthropic(
                 }
             };
 
-            let events = sse_parser.feed(&chunk);
+            let events = match sse_parser.feed(&chunk) {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::error!("SSE parse error: {e}");
+                    break;
+                }
+            };
             for sse_event in events {
                 let data: Value = match serde_json::from_str(&sse_event.data) {
                     Ok(v) => v,

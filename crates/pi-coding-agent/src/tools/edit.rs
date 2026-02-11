@@ -46,6 +46,17 @@ impl EditOperations for DefaultFileEditor {
             return Err(format!("File not found: {}", path.display()).into());
         }
 
+        // Reject non-regular files (FIFO, device, socket) to prevent blocking
+        let metadata = std::fs::metadata(path)?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "Not a regular file: {} (type: {:?})",
+                path.display(),
+                metadata.file_type()
+            )
+            .into());
+        }
+
         if old_string.is_empty() {
             return Err("old_string must not be empty".into());
         }

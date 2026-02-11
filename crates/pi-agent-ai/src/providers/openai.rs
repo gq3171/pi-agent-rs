@@ -1012,7 +1012,13 @@ pub fn stream_openai_completions(
                 }
             };
 
-            let events = sse_parser.feed(&chunk);
+            let events = match sse_parser.feed(&chunk) {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::error!("SSE parse error: {e}");
+                    break;
+                }
+            };
             for sse_event in events {
                 // OpenAI uses "message" as default event type (no explicit event: line)
                 // The SSE parser normalizes to "message" when no event type specified

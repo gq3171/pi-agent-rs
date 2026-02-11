@@ -59,29 +59,38 @@ impl SettingsManager {
         let unique = uuid::Uuid::new_v4();
         let tmp_path = path.with_file_name(format!(".settings.{unique}.tmp"));
 
-        // Create with restrictive permissions from the start
+        // Create with restrictive permissions from the start (no permission window)
         {
             use std::io::Write;
-            let mut file = std::fs::File::create(&tmp_path).map_err(|e| {
-                CodingAgentError::Io(std::io::Error::new(
-                    e.kind(),
-                    format!("Failed to create temp settings file: {e}"),
-                ))
-            })?;
 
             #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                if let Err(e) = file
-                    .set_permissions(std::fs::Permissions::from_mode(0o600))
-                {
-                    let _ = std::fs::remove_file(&tmp_path);
-                    return Err(CodingAgentError::Io(std::io::Error::new(
-                        std::io::ErrorKind::PermissionDenied,
-                        format!("Failed to restrict permissions on temp settings file: {e}"),
-                    )));
-                }
-            }
+            let mut file = {
+                use std::os::unix::fs::OpenOptionsExt;
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .mode(0o600)
+                    .open(&tmp_path)
+                    .map_err(|e| {
+                        CodingAgentError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("Failed to create temp settings file: {e}"),
+                        ))
+                    })?
+            };
+            #[cfg(not(unix))]
+            let mut file = {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&tmp_path)
+                    .map_err(|e| {
+                        CodingAgentError::Io(std::io::Error::new(
+                            e.kind(),
+                            format!("Failed to create temp settings file: {e}"),
+                        ))
+                    })?
+            };
 
             file.write_all(content.as_bytes()).map_err(|e| {
                 let _ = std::fs::remove_file(&tmp_path);

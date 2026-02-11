@@ -54,8 +54,19 @@ impl ReadOperations for DefaultFileReader {
             return Err(format!("File not found: {}", path.display()).into());
         }
 
+        // Reject non-regular files (FIFO, device, socket) to prevent blocking
+        let metadata = std::fs::metadata(path)?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "Not a regular file: {} (type: {:?})",
+                path.display(),
+                metadata.file_type()
+            )
+            .into());
+        }
+
         // Check file size before reading to prevent memory exhaustion
-        let file_size = std::fs::metadata(path)?.len();
+        let file_size = metadata.len();
 
         if path_utils::is_image(path) && file_size > MAX_IMAGE_FILE_SIZE {
             return Err(format!(

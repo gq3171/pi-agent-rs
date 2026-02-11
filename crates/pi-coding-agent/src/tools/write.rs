@@ -35,6 +35,19 @@ impl WriteOperations for DefaultFileWriter {
         path: &std::path::Path,
         content: &str,
     ) -> Result<WriteOutput, Box<dyn std::error::Error + Send + Sync>> {
+        // Reject non-regular files (FIFO, device, socket) to prevent blocking
+        if path.exists() {
+            let metadata = std::fs::metadata(path)?;
+            if !metadata.file_type().is_file() {
+                return Err(format!(
+                    "Not a regular file: {} (type: {:?})",
+                    path.display(),
+                    metadata.file_type()
+                )
+                .into());
+            }
+        }
+
         let created = !path.exists();
 
         // Ensure parent directory exists

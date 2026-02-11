@@ -231,6 +231,17 @@ impl AgentSession {
             Box::pin(async move { convert_to_llm(&msgs) })
         });
 
+        // Wire auth_storage into the get_api_key closure so saved/runtime
+        // credentials flow through to provider requests.
+        let auth = self.auth_storage.clone();
+        let get_api_key_fn: Arc<
+            dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync,
+        > = Arc::new(move |provider: &str| {
+            let auth = auth.clone();
+            let provider = provider.to_string();
+            Box::pin(async move { auth.get_api_key(&provider) })
+        });
+
         let config = AgentLoopConfig {
             model,
             reasoning: None,
@@ -244,7 +255,7 @@ impl AgentSession {
             max_retry_delay_ms: None,
             convert_to_llm: convert_fn,
             transform_context: None,
-            get_api_key: None,
+            get_api_key: Some(get_api_key_fn),
             get_steering_messages: None,
             get_follow_up_messages: None,
         };

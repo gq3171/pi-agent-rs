@@ -367,7 +367,13 @@ pub fn stream_azure_openai_responses(
                 }
             };
 
-            let events = sse_parser.feed(&chunk);
+            let events = match sse_parser.feed(&chunk) {
+                Ok(events) => events,
+                Err(e) => {
+                    tracing::error!("SSE parse error: {e}");
+                    break;
+                }
+            };
             let mut parsed_events: Vec<Value> = Vec::new();
             for sse_event in events {
                 let data_str = sse_event.data.trim();
