@@ -53,7 +53,7 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
     }
 
     pub fn push(&self, event: T) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if inner.done {
             return;
         }
@@ -76,7 +76,7 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
 
     /// Check if the stream is marked as done.
     pub fn is_done(&self) -> bool {
-        let inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.done
     }
 
@@ -84,7 +84,7 @@ impl<T: Send + 'static, R: Send + 'static> EventStream<T, R> {
     /// If result is None, the stream is marked as done but no result is sent
     /// (matching TS behavior where `end()` can be called without arguments).
     pub fn end(&self, result: Option<R>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.done = true;
         if let Some(r) = result {
             if let Some(sender) = inner.result_sender.take() {
@@ -120,7 +120,7 @@ impl<T: Send + 'static, R: Send + 'static> Stream for EventStream<T, R> {
     type Item = T;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 
         if let Some(event) = inner.queue.pop_front() {
             Poll::Ready(Some(event))

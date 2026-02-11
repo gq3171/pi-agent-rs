@@ -53,7 +53,9 @@ pub fn create_agent_session(
 
     // Load custom models from models.json
     let models_path = paths::models_file(&base_dir);
-    let _ = model_registry.load_custom_models(&models_path);
+    if let Err(e) = model_registry.load_custom_models(&models_path) {
+        tracing::warn!("Failed to load custom models from {}: {e}", models_path.display());
+    }
 
     // Add custom models from settings
     if let Some(custom_models) = &settings_manager.settings().custom_models {

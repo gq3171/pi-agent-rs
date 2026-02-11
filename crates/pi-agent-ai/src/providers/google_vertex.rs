@@ -445,7 +445,7 @@ fn resolve_location(options: &GoogleVertexOptions) -> Result<String, String> {
 
 /// Attempts to get a Google Cloud access token via `gcloud auth print-access-token`.
 /// Falls back to checking for an explicit key in the options/headers.
-fn get_access_token(options: &GoogleVertexOptions) -> Result<String, String> {
+async fn get_access_token(options: &GoogleVertexOptions) -> Result<String, String> {
     // Check if an explicit access token was provided in headers
     if let Some(headers) = &options.base.headers {
         if let Some(auth) = headers.get("authorization").or_else(|| headers.get("Authorization")) {
@@ -464,11 +464,16 @@ fn get_access_token(options: &GoogleVertexOptions) -> Result<String, String> {
         }
     }
 
-    // Try to get an access token via gcloud CLI
-    match std::process::Command::new("gcloud")
-        .args(["auth", "print-access-token"])
-        .output()
-    {
+    // Try to get an access token via gcloud CLI (blocking call, use spawn_blocking)
+    let result = tokio::task::spawn_blocking(|| {
+        std::process::Command::new("gcloud")
+            .args(["auth", "print-access-token"])
+            .output()
+    })
+    .await
+    .map_err(|e| format!("Failed to spawn gcloud task: {e}"))?;
+
+    match result {
         Ok(output) if output.status.success() => {
             let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if token.is_empty() {
@@ -745,7 +750,7 @@ pub fn stream_google_vertex(
         };
 
         // Obtain access token
-        let access_token = match get_access_token(&options) {
+        let access_token = match get_access_token(&options).await {
             Ok(t) => t,
             Err(e) => {
                 output.stop_reason = StopReason::Error;

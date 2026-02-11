@@ -106,7 +106,7 @@ impl AgentTool for WriteTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
         _on_update: Option<Box<dyn Fn(AgentToolResult) + Send + Sync>>,
     ) -> Result<AgentToolResult, Box<dyn std::error::Error + Send + Sync>> {
         let file_path = params
@@ -132,13 +132,20 @@ impl AgentTool for WriteTool {
         let writer = self.writer.clone();
         let resolved_clone = resolved.clone();
         let content = content.to_string();
-        let output = tokio::task::spawn_blocking(move || {
+        let io_task = tokio::task::spawn_blocking(move || {
             writer.write_file(&resolved_clone, &content)
-        })
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("Task join error: {e}").into()
-        })??;
+        });
+
+        let output = tokio::select! {
+            result = io_task => {
+                result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("Task join error: {e}").into()
+                })??
+            }
+            _ = cancel.cancelled() => {
+                return Err("Operation cancelled".into());
+            }
+        };
 
         let action = if output.created { "Created" } else { "Updated" };
         let text = format!(

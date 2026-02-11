@@ -151,7 +151,7 @@ impl AgentTool for EditTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
         _on_update: Option<Box<dyn Fn(AgentToolResult) + Send + Sync>>,
     ) -> Result<AgentToolResult, Box<dyn std::error::Error + Send + Sync>> {
         let file_path = params
@@ -186,13 +186,20 @@ impl AgentTool for EditTool {
         let resolved_clone = resolved.clone();
         let old_string = old_string.to_string();
         let new_string = new_string.to_string();
-        let output = tokio::task::spawn_blocking(move || {
+        let io_task = tokio::task::spawn_blocking(move || {
             editor.edit_file(&resolved_clone, &old_string, &new_string, replace_all)
-        })
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("Task join error: {e}").into()
-        })??;
+        });
+
+        let output = tokio::select! {
+            result = io_task => {
+                result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("Task join error: {e}").into()
+                })??
+            }
+            _ = cancel.cancelled() => {
+                return Err("Operation cancelled".into());
+            }
+        };
 
         let text = format!(
             "Replaced {} occurrence(s) in {}\n\n{}",

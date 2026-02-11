@@ -115,12 +115,12 @@ fn sign_request(
     access_key: &str,
     secret_key: &str,
     session_token: Option<&str>,
-) -> HashMap<String, String> {
+) -> Result<HashMap<String, String>, String> {
     let now = chrono::Utc::now();
     let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
     let date_stamp = now.format("%Y%m%d").to_string();
 
-    let parsed = url::Url::parse(url_str).expect("invalid URL");
+    let parsed = url::Url::parse(url_str).map_err(|e| format!("Invalid URL: {e}"))?;
     let host = parsed.host_str().unwrap_or("").to_string();
     let canonical_uri = parsed.path().to_string();
     let canonical_querystring = parsed.query().unwrap_or("").to_string();
@@ -178,7 +178,7 @@ fn sign_request(
         headers.insert("x-amz-security-token".to_string(), token.to_string());
     }
 
-    headers
+    Ok(headers)
 }
 
 // ---------- Helper functions ----------
@@ -1058,7 +1058,7 @@ pub fn stream_bedrock(
                 .header("content-type", "application/json")
                 .header("authorization", format!("Bearer {bearer}"));
         } else if let Some((access_key, secret_key, session_token)) = resolve_aws_credentials() {
-            let headers = sign_request(
+            let headers = match sign_request(
                 "POST",
                 &url,
                 &body_bytes,
@@ -1066,7 +1066,18 @@ pub fn stream_bedrock(
                 &access_key,
                 &secret_key,
                 session_token.as_deref(),
-            );
+            ) {
+                Ok(h) => h,
+                Err(e) => {
+                    output.stop_reason = StopReason::Error;
+                    output.error_message = Some(format!("SigV4 signing error: {e}"));
+                    stream_clone.push(AssistantMessageEvent::Error {
+                        reason: StopReason::Error,
+                        error: output,
+                    });
+                    return;
+                }
+            };
             for (k, v) in &headers {
                 request = request.header(k.as_str(), v.as_str());
             }
@@ -1771,7 +1782,8 @@ mod tests {
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
             None,
-        );
+        )
+        .unwrap();
         assert!(headers.contains_key("authorization"));
         assert!(headers["authorization"].starts_with("AWS4-HMAC-SHA256"));
         assert!(headers.contains_key("x-amz-date"));
@@ -1788,7 +1800,8 @@ mod tests {
             "AKIAIOSFODNN7EXAMPLE",
             "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
             Some("session-token-value"),
-        );
+        )
+        .unwrap();
         assert!(headers.contains_key("x-amz-security-token"));
         assert_eq!(headers["x-amz-security-token"], "session-token-value");
         // Authorization should include the security token header in signed headers

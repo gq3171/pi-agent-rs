@@ -54,7 +54,8 @@ impl BashOperations for DefaultBashExecutor {
             .arg(command)
             .current_dir(working_dir)
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
+            .stderr(std::process::Stdio::piped())
+            .kill_on_drop(true);
 
         // Create a new process group so we can kill all child processes
         #[cfg(unix)]

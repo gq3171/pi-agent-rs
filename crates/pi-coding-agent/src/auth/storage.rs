@@ -80,13 +80,13 @@ impl AuthStorage {
 
     /// Set a runtime credential override (highest priority).
     pub fn set_runtime_credential(&self, provider: &str, credential: AuthCredential) {
-        let mut rt = self.runtime.write().unwrap();
+        let mut rt = self.runtime.write().unwrap_or_else(|e| e.into_inner());
         rt.insert(provider.to_string(), credential);
     }
 
     /// Remove a runtime credential.
     pub fn remove_runtime_credential(&self, provider: &str) {
-        let mut rt = self.runtime.write().unwrap();
+        let mut rt = self.runtime.write().unwrap_or_else(|e| e.into_inner());
         rt.remove(provider);
     }
 
@@ -99,7 +99,7 @@ impl AuthStorage {
     pub fn get_credential(&self, provider: &str) -> Option<AuthCredential> {
         // 1. Runtime overrides
         {
-            let rt = self.runtime.read().unwrap();
+            let rt = self.runtime.read().unwrap_or_else(|e| e.into_inner());
             if let Some(cred) = rt.get(provider) {
                 if !cred.is_expired() {
                     return Some(cred.clone());
@@ -137,7 +137,7 @@ impl AuthStorage {
     fn load_auth_file(&self) -> Option<AuthFile> {
         // Check cache first
         {
-            let cache = self.file_cache.read().unwrap();
+            let cache = self.file_cache.read().unwrap_or_else(|e| e.into_inner());
             if cache.is_some() {
                 return cache.clone();
             }
@@ -154,7 +154,7 @@ impl AuthStorage {
 
         // Cache it
         {
-            let mut cache = self.file_cache.write().unwrap();
+            let mut cache = self.file_cache.write().unwrap_or_else(|e| e.into_inner());
             *cache = Some(auth_file.clone());
         }
 
@@ -166,7 +166,7 @@ impl AuthStorage {
         auth_file.credentials.get(provider).cloned()
     }
 
-    /// Save a credential to auth.json.
+    /// Save a credential to auth.json (atomic write via temp file + rename).
     pub fn save_credential(
         &self,
         provider: &str,
@@ -181,11 +181,11 @@ impl AuthStorage {
             .insert(provider.to_string(), credential.clone());
 
         let content = serde_json::to_string_pretty(&auth_file)?;
-        std::fs::write(&path, content)?;
+        Self::atomic_write(&path, &content)?;
 
         // Update cache
         {
-            let mut cache = self.file_cache.write().unwrap();
+            let mut cache = self.file_cache.write().unwrap_or_else(|e| e.into_inner());
             *cache = Some(auth_file);
         }
 
@@ -203,20 +203,36 @@ impl AuthStorage {
         auth_file.credentials.remove(provider);
 
         let content = serde_json::to_string_pretty(&auth_file)?;
-        std::fs::write(&path, content)?;
+        Self::atomic_write(&path, &content)?;
 
         // Update cache
         {
-            let mut cache = self.file_cache.write().unwrap();
+            let mut cache = self.file_cache.write().unwrap_or_else(|e| e.into_inner());
             *cache = Some(auth_file);
         }
 
         Ok(())
     }
 
+    /// Write content to a file atomically via temp file + rename.
+    /// On Unix, also restricts permissions to owner-only (0600).
+    fn atomic_write(path: &Path, content: &str) -> Result<(), CodingAgentError> {
+        let tmp_path = path.with_extension("json.tmp");
+        std::fs::write(&tmp_path, content)?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        std::fs::rename(&tmp_path, path)?;
+        Ok(())
+    }
+
     /// Invalidate the file cache, forcing re-read on next access.
     pub fn invalidate_cache(&self) {
-        let mut cache = self.file_cache.write().unwrap();
+        let mut cache = self.file_cache.write().unwrap_or_else(|e| e.into_inner());
         *cache = None;
     }
 
@@ -226,7 +242,7 @@ impl AuthStorage {
 
         // Runtime
         {
-            let rt = self.runtime.read().unwrap();
+            let rt = self.runtime.read().unwrap_or_else(|e| e.into_inner());
             for key in rt.keys() {
                 providers.insert(key.clone());
             }

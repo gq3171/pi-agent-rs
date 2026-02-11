@@ -301,8 +301,17 @@ async fn stream_assistant_response(
     };
 
     // Call stream function
-    let default_stream_fn: StreamFnBox = Arc::new(|_model, _context, _options| {
-        panic!("No stream function provided and no default available. Use fishbot-ai to provide one.");
+    let default_stream_fn: StreamFnBox = Arc::new(|model, _context, _options| {
+        let stream = crate::event_stream::create_assistant_message_event_stream();
+        let mut msg = AssistantMessage::empty(model);
+        msg.stop_reason = StopReason::Error;
+        msg.error_message =
+            Some("No stream function provided and no default available".to_string());
+        stream.push(AssistantMessageEvent::Error {
+            reason: StopReason::Error,
+            error: msg,
+        });
+        stream
     });
 
     let actual_stream_fn = stream_fn.unwrap_or(&default_stream_fn);
@@ -365,8 +374,29 @@ async fn stream_assistant_response(
         }
     }
 
-    // Fallback - should not normally reach here
-    partial_message.unwrap_or_else(|| AssistantMessage::empty(&config.model))
+    // Stream ended without Done/Error event — construct error response
+    let mut error_msg =
+        partial_message.unwrap_or_else(|| AssistantMessage::empty(&config.model));
+    error_msg.stop_reason = StopReason::Error;
+    if error_msg.error_message.is_none() {
+        error_msg.error_message =
+            Some("LLM stream ended without a completion event".to_string());
+    }
+    if added_partial {
+        let len = context.messages.len();
+        context.messages[len - 1] = error_msg.clone().into();
+    } else {
+        context.messages.push(error_msg.clone().into());
+    }
+    if !added_partial {
+        stream.push(AgentEvent::MessageStart {
+            message: error_msg.clone().into(),
+        });
+    }
+    stream.push(AgentEvent::MessageEnd {
+        message: error_msg.clone().into(),
+    });
+    error_msg
 }
 
 fn extract_partial(event: &AssistantMessageEvent) -> Option<&AssistantMessage> {

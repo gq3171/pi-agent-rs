@@ -65,7 +65,19 @@ impl SessionManager {
         };
 
         let path = self.session_path(session_id);
-        let mut file = std::fs::File::create(&path)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    CodingAgentError::Session(format!(
+                        "Session already exists: {session_id}"
+                    ))
+                } else {
+                    CodingAgentError::Io(e)
+                }
+            })?;
         let line = serde_json::to_string(&header)?;
         writeln!(file, "{line}")?;
 

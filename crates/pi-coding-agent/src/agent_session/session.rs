@@ -269,8 +269,13 @@ impl AgentSession {
             } = event
             {
                 if let Some(session_id) = &self.session_id {
-                    let message_value = serde_json::to_value(assistant_msg)
-                        .unwrap_or(serde_json::Value::Null);
+                    let message_value = match serde_json::to_value(assistant_msg) {
+                        Ok(val) => val,
+                        Err(e) => {
+                            tracing::error!("Failed to serialize assistant message: {e}");
+                            serde_json::json!({"error": format!("Serialization failed: {e}")})
+                        }
+                    };
                     let entry = SessionEntry::Assistant {
                         id: SessionEntry::new_id(),
                         parent_id: None,

@@ -38,6 +38,11 @@ pub struct ReadOutput {
 /// Default file reader.
 pub struct DefaultFileReader;
 
+/// Maximum file size for text files (10 MB).
+const MAX_TEXT_FILE_SIZE: u64 = 10 * 1024 * 1024;
+/// Maximum file size for image files (20 MB).
+const MAX_IMAGE_FILE_SIZE: u64 = 20 * 1024 * 1024;
+
 impl ReadOperations for DefaultFileReader {
     fn read_file(
         &self,
@@ -47,6 +52,28 @@ impl ReadOperations for DefaultFileReader {
     ) -> Result<ReadOutput, Box<dyn std::error::Error + Send + Sync>> {
         if !path.exists() {
             return Err(format!("File not found: {}", path.display()).into());
+        }
+
+        // Check file size before reading to prevent memory exhaustion
+        let file_size = std::fs::metadata(path)?.len();
+
+        if path_utils::is_image(path) && file_size > MAX_IMAGE_FILE_SIZE {
+            return Err(format!(
+                "Image too large: {} bytes (limit: {} bytes)",
+                file_size, MAX_IMAGE_FILE_SIZE
+            )
+            .into());
+        }
+
+        if !path_utils::is_image(path)
+            && !path_utils::is_likely_binary(path)
+            && file_size > MAX_TEXT_FILE_SIZE
+        {
+            return Err(format!(
+                "File too large: {} bytes (limit: {} bytes)",
+                file_size, MAX_TEXT_FILE_SIZE
+            )
+            .into());
         }
 
         if path_utils::is_image(path) {
@@ -172,7 +199,7 @@ impl AgentTool for ReadTool {
         &self,
         _tool_call_id: &str,
         params: Value,
-        _cancel: CancellationToken,
+        cancel: CancellationToken,
         _on_update: Option<Box<dyn Fn(AgentToolResult) + Send + Sync>>,
     ) -> Result<AgentToolResult, Box<dyn std::error::Error + Send + Sync>> {
         let file_path = params
@@ -195,13 +222,20 @@ impl AgentTool for ReadTool {
 
         let reader = self.reader.clone();
         let resolved_clone = resolved.clone();
-        let output = tokio::task::spawn_blocking(move || {
+        let io_task = tokio::task::spawn_blocking(move || {
             reader.read_file(&resolved_clone, offset, limit)
-        })
-        .await
-        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
-            format!("Task join error: {e}").into()
-        })??;
+        });
+
+        let output = tokio::select! {
+            result = io_task => {
+                result.map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+                    format!("Task join error: {e}").into()
+                })??
+            }
+            _ = cancel.cancelled() => {
+                return Err("Operation cancelled".into());
+            }
+        };
 
         if output.is_image {
             if let (Some(data), Some(mime)) = (output.image_data, output.mime_type) {
