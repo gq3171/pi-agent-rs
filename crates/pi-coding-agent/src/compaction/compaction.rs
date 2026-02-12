@@ -167,6 +167,14 @@ fn find_cut_point(messages: &[AgentMessage], keep_recent_tokens: u64) -> usize {
 }
 
 // ============================================================================
+// Compaction summary format — aligned with pi-mono messages.ts:11-17
+// ============================================================================
+
+pub const COMPACTION_SUMMARY_PREFIX: &str =
+    "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
+pub const COMPACTION_SUMMARY_SUFFIX: &str = "\n</summary>";
+
+// ============================================================================
 // Compaction preparation — token-based, aligned with pi-mono
 // ============================================================================
 
@@ -198,10 +206,10 @@ pub fn prepare_compaction(
 pub fn apply_compaction(summary: &str, kept_messages: Vec<AgentMessage>) -> Vec<AgentMessage> {
     let mut result = Vec::new();
 
-    // Insert the summary as a user message
+    // Insert the summary as a user message (aligned with pi-mono messages.ts)
     result.push(AgentMessage::Llm(Message::User(UserMessage {
         content: UserContent::Text(format!(
-            "[Previous conversation summary]\n\n{summary}"
+            "{COMPACTION_SUMMARY_PREFIX}{summary}{COMPACTION_SUMMARY_SUFFIX}"
         )),
         timestamp: chrono::Utc::now().timestamp_millis(),
     })));

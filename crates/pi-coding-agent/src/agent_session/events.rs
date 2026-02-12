@@ -40,6 +40,20 @@ pub enum AgentSessionEvent {
         fork_entry_id: String,
     },
 
+    /// A retry attempt is starting due to a transient error.
+    RetryStart {
+        attempt: u32,
+        max_attempts: u32,
+        delay_ms: u64,
+        error_message: String,
+    },
+
+    /// A retry attempt has completed.
+    RetryEnd {
+        attempt: u32,
+        success: bool,
+    },
+
     /// Error occurred at session level.
     Error {
         message: String,
@@ -55,6 +69,8 @@ impl AgentSessionEvent {
             AgentSessionEvent::ModelSwitched { .. } => "model_switched",
             AgentSessionEvent::Compacted { .. } => "compacted",
             AgentSessionEvent::Forked { .. } => "forked",
+            AgentSessionEvent::RetryStart { .. } => "retry_start",
+            AgentSessionEvent::RetryEnd { .. } => "retry_end",
             AgentSessionEvent::Error { .. } => "session_error",
         }
     }

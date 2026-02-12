@@ -9,7 +9,7 @@ use tokio_util::sync::CancellationToken;
 use pi_agent_core::agent_types::{
     AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, StreamFnBox,
 };
-use pi_agent_core::types::{Message, Model};
+use pi_agent_core::types::{Message, Model, StopReason};
 
 use crate::agent_session::events::AgentSessionEvent;
 use crate::auth::storage::AuthStorage;
@@ -17,6 +17,7 @@ use crate::compaction::compaction;
 use crate::error::CodingAgentError;
 use crate::messages::convert::convert_to_llm;
 use crate::model::registry::ModelRegistry;
+use crate::retry::{self, RetryConfig};
 use crate::session::manager::SessionManager;
 use crate::session::types::SessionEntry;
 use crate::settings::manager::SettingsManager;
@@ -60,9 +61,10 @@ pub struct SessionStats {
 pub type EventListener = Box<dyn Fn(AgentSessionEvent) + Send + Sync>;
 
 /// Type alias for summary generation function.
-/// Takes conversation context (messages to summarize) and returns a summary string.
+/// Takes conversation context (messages to summarize) and an optional previous
+/// summary for incremental summarization. Returns a summary string.
 pub type SummaryFn = Arc<
-    dyn Fn(Vec<AgentMessage>) -> Pin<Box<dyn Future<Output = Result<String, CodingAgentError>> + Send>>
+    dyn Fn(Vec<AgentMessage>, Option<String>) -> Pin<Box<dyn Future<Output = Result<String, CodingAgentError>> + Send>>
         + Send
         + Sync,
 >;
@@ -101,6 +103,10 @@ pub struct AgentSession {
     settings_manager: Arc<SettingsManager>,
     /// Summary generation function for compaction.
     summary_fn: Option<SummaryFn>,
+    /// Retry configuration for transient errors.
+    retry_config: RetryConfig,
+    /// Current retry attempt counter (reset per prompt).
+    retry_attempt: u32,
     /// Cancellation token.
     cancel: CancellationToken,
     /// Event listeners.
@@ -131,6 +137,8 @@ impl AgentSession {
             model_registry,
             settings_manager,
             summary_fn: None,
+            retry_config: RetryConfig::default(),
+            retry_attempt: 0,
             cancel: CancellationToken::new(),
             listeners: Vec::new(),
             turn_count: 0,
@@ -155,6 +163,11 @@ impl AgentSession {
     /// Set the summary generation function for compaction.
     pub fn set_summary_fn(&mut self, summary_fn: SummaryFn) {
         self.summary_fn = Some(summary_fn);
+    }
+
+    /// Set the retry configuration for transient errors.
+    pub fn set_retry_config(&mut self, config: RetryConfig) {
+        self.retry_config = config;
     }
 
     /// Send a prompt to the agent.
@@ -220,12 +233,6 @@ impl AgentSession {
 
         self.turn_count += 1;
 
-        let context = AgentContext {
-            system_prompt,
-            messages: self.messages.clone(),
-            tools: self.tools.clone(),
-        };
-
         let convert_fn: ConvertToLlmFn = Arc::new(|msgs: &[AgentMessage]| {
             let msgs = msgs.to_vec();
             Box::pin(async move { convert_to_llm(&msgs) })
@@ -242,88 +249,172 @@ impl AgentSession {
             Box::pin(async move { auth.get_api_key(&provider) })
         });
 
-        let config = AgentLoopConfig {
-            model,
-            reasoning: None,
-            thinking_budgets: None,
-            temperature: None,
-            max_tokens: None,
-            api_key: None,
-            cache_retention: None,
-            session_id: self.session_id.clone(),
-            headers: None,
-            max_retry_delay_ms: None,
-            convert_to_llm: convert_fn,
-            transform_context: None,
-            get_api_key: Some(get_api_key_fn),
-            get_steering_messages: None,
-            get_follow_up_messages: None,
-        };
+        // Reset retry attempt counter for this prompt
+        self.retry_attempt = 0;
+        let context_window = model.context_window;
 
-        // Reset cancellation for this prompt
-        self.cancel = CancellationToken::new();
+        loop {
+            let config = AgentLoopConfig {
+                model: model.clone(),
+                reasoning: None,
+                thinking_budgets: None,
+                temperature: None,
+                max_tokens: None,
+                api_key: None,
+                cache_retention: None,
+                session_id: self.session_id.clone(),
+                headers: None,
+                max_retry_delay_ms: None,
+                convert_to_llm: convert_fn.clone(),
+                transform_context: None,
+                get_api_key: Some(get_api_key_fn.clone()),
+                get_steering_messages: None,
+                get_follow_up_messages: None,
+            };
 
-        let event_stream = pi_agent_core::agent_loop::agent_loop(
-            vec![user_msg],
-            context,
-            config,
-            self.cancel.clone(),
-            self.stream_fn.clone(),
-        );
+            // Reset cancellation for this prompt attempt
+            self.cancel = CancellationToken::new();
 
-        // Consume events from the agent loop, forwarding to listeners
-        let mut pinned = Box::pin(event_stream.clone());
-        while let Some(event) = pinned.next().await {
-            // Persist assistant entries on message end
-            if let AgentEvent::MessageEnd {
-                message: AgentMessage::Llm(Message::Assistant(ref assistant_msg)),
-            } = event
-            {
-                if let Some(session_id) = &self.session_id {
-                    let message_value = match serde_json::to_value(assistant_msg) {
-                        Ok(val) => val,
-                        Err(e) => {
-                            tracing::error!("Failed to serialize assistant message: {e}");
-                            serde_json::json!({"error": format!("Serialization failed: {e}")})
+            let event_stream = pi_agent_core::agent_loop::agent_loop(
+                vec![user_msg.clone()],
+                AgentContext {
+                    system_prompt: system_prompt.clone(),
+                    messages: self.messages.clone(),
+                    tools: self.tools.clone(),
+                },
+                config,
+                self.cancel.clone(),
+                self.stream_fn.clone(),
+            );
+
+            // Consume events from the agent loop, forwarding to listeners
+            let mut pinned = Box::pin(event_stream.clone());
+            while let Some(event) = pinned.next().await {
+                // Persist assistant entries on message end
+                if let AgentEvent::MessageEnd {
+                    message: AgentMessage::Llm(Message::Assistant(ref assistant_msg)),
+                } = event
+                {
+                    if let Some(session_id) = &self.session_id {
+                        let message_value = match serde_json::to_value(assistant_msg) {
+                            Ok(val) => val,
+                            Err(e) => {
+                                tracing::error!("Failed to serialize assistant message: {e}");
+                                serde_json::json!({"error": format!("Serialization failed: {e}")})
+                            }
+                        };
+                        let entry = SessionEntry::Assistant {
+                            id: SessionEntry::new_id(),
+                            parent_id: None,
+                            timestamp: chrono::Utc::now().timestamp_millis(),
+                            message: message_value,
+                        };
+                        if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
+                            tracing::warn!("Failed to persist assistant entry: {e}");
                         }
-                    };
-                    let entry = SessionEntry::Assistant {
-                        id: SessionEntry::new_id(),
-                        parent_id: None,
-                        timestamp: chrono::Utc::now().timestamp_millis(),
-                        message: message_value,
-                    };
-                    if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
-                        tracing::warn!("Failed to persist assistant entry: {e}");
                     }
                 }
+
+                self.emit(AgentSessionEvent::Agent(event));
             }
 
-            self.emit(AgentSessionEvent::Agent(event));
-        }
+            // Get the final messages from the agent loop result
+            match event_stream.result().await {
+                Some(new_messages) => {
+                    // Check the last assistant message for retryable errors
+                    let should_retry = self.retry_config.enabled
+                        && self.retry_attempt < self.retry_config.max_retries
+                        && Self::check_last_message_retryable(&new_messages, context_window);
 
-        // Get the final messages from the agent loop result
-        // agent_loop returns only the NEW messages (prompts + responses)
-        match event_stream.result().await {
-            Some(new_messages) => {
-                self.messages.extend(new_messages);
-                if let Some(session_id) = &self.session_id {
-                    self.emit(AgentSessionEvent::SessionEnd {
-                        session_id: session_id.clone(),
-                        messages: self.messages.clone(),
+                    if should_retry {
+                        self.retry_attempt += 1;
+                        let delay_ms =
+                            retry::calculate_delay(&self.retry_config, self.retry_attempt);
+                        let error_msg = Self::extract_last_error_message(&new_messages)
+                            .unwrap_or_default();
+
+                        self.emit(AgentSessionEvent::RetryStart {
+                            attempt: self.retry_attempt,
+                            max_attempts: self.retry_config.max_retries,
+                            delay_ms,
+                            error_message: error_msg.clone(),
+                        });
+
+                        tracing::warn!(
+                            attempt = self.retry_attempt,
+                            max = self.retry_config.max_retries,
+                            delay_ms,
+                            error = %error_msg,
+                            "Retrying after transient error"
+                        );
+
+                        tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+
+                        // Do NOT extend self.messages with error messages — retry from scratch
+                        continue;
+                    }
+
+                    // Success or non-retryable — commit messages
+                    if self.retry_attempt > 0 {
+                        self.emit(AgentSessionEvent::RetryEnd {
+                            attempt: self.retry_attempt,
+                            success: true,
+                        });
+                    }
+
+                    self.messages.extend(new_messages);
+                    if let Some(session_id) = &self.session_id {
+                        self.emit(AgentSessionEvent::SessionEnd {
+                            session_id: session_id.clone(),
+                            messages: self.messages.clone(),
+                        });
+                    }
+                }
+                None => {
+                    if self.retry_attempt > 0 {
+                        self.emit(AgentSessionEvent::RetryEnd {
+                            attempt: self.retry_attempt,
+                            success: false,
+                        });
+                    }
+                    let err_msg = "Agent loop ended without producing a result".to_string();
+                    self.emit(AgentSessionEvent::Error {
+                        message: err_msg.clone(),
                     });
+                    return Err(CodingAgentError::Agent(err_msg));
                 }
             }
-            None => {
-                let err_msg = "Agent loop ended without producing a result".to_string();
-                self.emit(AgentSessionEvent::Error {
-                    message: err_msg.clone(),
-                });
-                return Err(CodingAgentError::Agent(err_msg));
-            }
+
+            break;
         }
 
         Ok(())
+    }
+
+    /// Check if the last assistant message in new_messages contains a retryable error.
+    fn check_last_message_retryable(messages: &[AgentMessage], context_window: u64) -> bool {
+        // Find the last assistant message
+        for msg in messages.iter().rev() {
+            if let AgentMessage::Llm(Message::Assistant(assistant)) = msg {
+                if assistant.stop_reason == StopReason::Error {
+                    if let Some(ref error_msg) = assistant.error_message {
+                        return retry::is_retryable_error(error_msg, context_window);
+                    }
+                }
+                break;
+            }
+        }
+        false
+    }
+
+    /// Extract the error message from the last assistant message, if any.
+    fn extract_last_error_message(messages: &[AgentMessage]) -> Option<String> {
+        for msg in messages.iter().rev() {
+            if let AgentMessage::Llm(Message::Assistant(assistant)) = msg {
+                return assistant.error_message.clone();
+            }
+        }
+        None
     }
 
     /// Abort the current operation.
@@ -353,6 +444,22 @@ impl AgentSession {
         self.model = Some(model);
     }
 
+    /// Find the most recent compaction summary from persisted session entries.
+    ///
+    /// Walks the JSONL entries in reverse to find the last `Summary` entry,
+    /// which represents the previous compaction result.
+    fn find_last_compaction_summary(&self) -> Option<String> {
+        let session_id = self.session_id.as_ref()?;
+        let (_header, entries) = self.session_manager.open(session_id).ok()?;
+        entries.iter().rev().find_map(|entry| {
+            if let SessionEntry::Summary { summary, .. } = entry {
+                Some(summary.clone())
+            } else {
+                None
+            }
+        })
+    }
+
     /// Compact the conversation using the given settings.
     ///
     /// Uses token-based cut point detection (aligned with pi-mono) to decide
@@ -360,7 +467,8 @@ impl AgentSession {
     /// (`reserve_tokens: 16384`, `keep_recent_tokens: 20000`).
     ///
     /// If a `summary_fn` is set on the session, it will be used to generate
-    /// an LLM-based summary. Otherwise, a context-based summary is produced.
+    /// an LLM-based summary. The previous compaction summary (if any) is
+    /// passed to the summary function for incremental summarization.
     pub async fn compact(
         &mut self,
         settings: Option<&compaction::CompactionSettings>,
@@ -379,14 +487,16 @@ impl AgentSession {
             ));
         }
 
+        // Look up the previous compaction summary for incremental summarization
+        let previous_summary = self.find_last_compaction_summary();
+
         // Generate summary — use LLM-based summary_fn if available
         let summary = if let Some(summary_fn) = &self.summary_fn {
-            summary_fn(to_summarize.to_vec()).await?
+            summary_fn(to_summarize.to_vec(), previous_summary).await?
         } else {
             // Fallback: use structured context extraction (no LLM)
             let summary_context =
-                crate::compaction::branch_summary::generate_summary_context(&to_summarize);
-            // Truncate at a valid UTF-8 char boundary
+                crate::compaction::branch_summary::serialize_conversation(&to_summarize);
             let max_len = 500;
             let end = summary_context
                 .char_indices()

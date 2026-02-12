@@ -11,6 +11,7 @@ pub mod resources;
 pub mod system_prompt;
 pub mod agent_session;
 pub mod extensions;
+pub mod retry;
 
 // ========== Public API re-exports ==========
 // These match the OpenClaw import requirements.
@@ -53,7 +54,9 @@ pub use resources::skills::{Skill, load_skills_from_dir};
 
 // Compaction
 pub use compaction::compaction::{estimate_tokens, estimate_messages_tokens};
+#[allow(deprecated)]
 pub use compaction::branch_summary::generate_summary_context;
+pub use compaction::branch_summary::serialize_conversation;
 
 // Tools
 pub use tools::{
