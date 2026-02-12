@@ -353,16 +353,25 @@ impl AgentSession {
         self.model = Some(model);
     }
 
-    /// Compact the conversation.
+    /// Compact the conversation using the given settings.
+    ///
+    /// Uses token-based cut point detection (aligned with pi-mono) to decide
+    /// how much context to keep. If `settings` is `None`, uses defaults
+    /// (`reserve_tokens: 16384`, `keep_recent_tokens: 20000`).
     ///
     /// If a `summary_fn` is set on the session, it will be used to generate
     /// an LLM-based summary. Otherwise, a context-based summary is produced.
-    pub async fn compact(&mut self) -> Result<CompactionResult, CodingAgentError> {
+    pub async fn compact(
+        &mut self,
+        settings: Option<&compaction::CompactionSettings>,
+    ) -> Result<CompactionResult, CodingAgentError> {
+        let default_settings = compaction::CompactionSettings::default();
+        let settings = settings.unwrap_or(&default_settings);
+
         let tokens_before = compaction::estimate_messages_tokens(&self.messages);
         let messages_before = self.messages.len();
 
-        // Keep the last 6 messages (3 turns) by default
-        let (to_summarize, to_keep) = compaction::prepare_compaction(&self.messages, 6);
+        let (to_summarize, to_keep) = compaction::prepare_compaction(&self.messages, settings);
 
         if to_summarize.is_empty() {
             return Err(CodingAgentError::Compaction(
@@ -423,6 +432,23 @@ impl AgentSession {
         }
 
         Ok(result)
+    }
+
+    /// Restore a previously-persisted session by loading its JSONL history.
+    ///
+    /// This rebuilds the in-memory `messages` and `turn_count` from the
+    /// session entries stored on disk, allowing the agent to continue a
+    /// conversation across process restarts.
+    pub fn restore_session(&mut self, session_id: &str) -> Result<(), CodingAgentError> {
+        let (_header, entries) = self.session_manager.open(session_id)?;
+        self.session_id = Some(session_id.to_string());
+        self.messages = crate::session::context::build_session_context(&entries);
+        self.turn_count = self
+            .messages
+            .iter()
+            .filter(|m| matches!(m, AgentMessage::Llm(Message::User(_))))
+            .count();
+        Ok(())
     }
 
     /// Fork the session from a specific entry.
