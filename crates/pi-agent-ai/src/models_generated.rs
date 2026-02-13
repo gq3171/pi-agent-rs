@@ -1,8 +1,8 @@
 #![allow(clippy::approx_constant)]
-use std::collections::HashMap;
-use serde_json::json;
 use once_cell::sync::Lazy;
 use pi_agent_core::types::{Model, ModelCost};
+use serde_json::json;
+use std::collections::HashMap;
 
 pub static ALL_MODELS: Lazy<Vec<Model>> = Lazy::new(|| all_models());
 
@@ -2532,8 +2532,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 16000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "claude-opus-4.5".into(),
@@ -2551,8 +2558,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 16000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "claude-opus-4.6".into(),
@@ -2570,8 +2584,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "claude-sonnet-4".into(),
@@ -2589,8 +2610,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 16000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "claude-sonnet-4.5".into(),
@@ -2608,8 +2636,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 16000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gemini-2.5-pro".into(),
@@ -2627,8 +2662,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gemini-3-flash-preview".into(),
@@ -2646,8 +2688,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gemini-3-pro-preview".into(),
@@ -2665,8 +2714,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gpt-4.1".into(),
@@ -2684,8 +2740,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 16384,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gpt-4o".into(),
@@ -2703,8 +2766,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 64000,
             max_tokens: 16384,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gpt-5".into(),
@@ -2722,7 +2792,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 128000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2741,7 +2816,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2760,7 +2840,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 128000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2779,7 +2864,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 128000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2798,7 +2888,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 128000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2817,7 +2912,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 100000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2836,7 +2936,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2855,7 +2960,12 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 272000,
             max_tokens: 128000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
             compat: None,
         },
         Model {
@@ -2874,8 +2984,15 @@ pub fn all_models() -> Vec<Model> {
             },
             context_window: 128000,
             max_tokens: 64000,
-            headers: Some(HashMap::from([("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()), ("Editor-Version".into(), "vscode/1.107.0".into()), ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()), ("Copilot-Integration-Id".into(), "vscode-chat".into())])),
-            compat: Some(json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false})),
+            headers: Some(HashMap::from([
+                ("User-Agent".into(), "GitHubCopilotChat/0.35.0".into()),
+                ("Editor-Version".into(), "vscode/1.107.0".into()),
+                ("Editor-Plugin-Version".into(), "copilot-chat/0.35.0".into()),
+                ("Copilot-Integration-Id".into(), "vscode-chat".into()),
+            ])),
+            compat: Some(
+                json!({"supportsStore":false,"supportsDeveloperRole":false,"supportsReasoningEffort":false}),
+            ),
         },
         Model {
             id: "gemini-1.5-flash".into(),

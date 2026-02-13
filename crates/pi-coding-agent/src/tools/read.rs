@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use pi_agent_core::agent_types::{AgentTool, AgentToolResult};
@@ -217,8 +217,14 @@ impl AgentTool for ReadTool {
             .get("file_path")
             .and_then(|v| v.as_str())
             .ok_or("Missing 'file_path' parameter")?;
-        let offset = params.get("offset").and_then(|v| v.as_u64()).map(|v| v as usize);
-        let limit = params.get("limit").and_then(|v| v.as_u64()).map(|v| v as usize);
+        let offset = params
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
+        let limit = params
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize);
 
         let resolved = path_utils::resolve_path(file_path, &self.working_dir);
 
@@ -233,9 +239,8 @@ impl AgentTool for ReadTool {
 
         let reader = self.reader.clone();
         let resolved_clone = resolved.clone();
-        let io_task = tokio::task::spawn_blocking(move || {
-            reader.read_file(&resolved_clone, offset, limit)
-        });
+        let io_task =
+            tokio::task::spawn_blocking(move || reader.read_file(&resolved_clone, offset, limit));
 
         let output = tokio::select! {
             result = io_task => {

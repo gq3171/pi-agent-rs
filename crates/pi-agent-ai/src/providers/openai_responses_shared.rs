@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use regex::Regex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use pi_agent_core::json_parse::parse_streaming_json;
 use pi_agent_core::sanitize::sanitize_surrogates;
@@ -141,7 +141,11 @@ pub fn convert_responses_messages(
 
     if include_system_prompt {
         if let Some(sp) = &context.system_prompt {
-            let role = if model.reasoning { "developer" } else { "system" };
+            let role = if model.reasoning {
+                "developer"
+            } else {
+                "system"
+            };
             messages.push(json!({
                 "role": role,
                 "content": sanitize_surrogates(sp)
@@ -152,16 +156,15 @@ pub fn convert_responses_messages(
     let mut msg_index: usize = 0;
     for msg in &transformed {
         match msg {
-            Message::User(user_msg) => {
-                match &user_msg.content {
-                    UserContent::Text(text) => {
-                        messages.push(json!({
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": sanitize_surrogates(text)}]
-                        }));
-                    }
-                    UserContent::Blocks(blocks) => {
-                        let content: Vec<Value> = blocks
+            Message::User(user_msg) => match &user_msg.content {
+                UserContent::Text(text) => {
+                    messages.push(json!({
+                        "role": "user",
+                        "content": [{"type": "input_text", "text": sanitize_surrogates(text)}]
+                    }));
+                }
+                UserContent::Blocks(blocks) => {
+                    let content: Vec<Value> = blocks
                             .iter()
                             .map(|item| match item {
                                 ContentBlock::Text(t) => {
@@ -179,29 +182,28 @@ pub fn convert_responses_messages(
                             .filter(|v| !v.is_null())
                             .collect();
 
-                        let filtered: Vec<Value> = if !model.input.contains(&"image".to_string()) {
-                            content
-                                .into_iter()
-                                .filter(|c| {
-                                    c.get("type").and_then(|t| t.as_str()) != Some("input_image")
-                                })
-                                .collect()
-                        } else {
-                            content
-                        };
+                    let filtered: Vec<Value> = if !model.input.contains(&"image".to_string()) {
+                        content
+                            .into_iter()
+                            .filter(|c| {
+                                c.get("type").and_then(|t| t.as_str()) != Some("input_image")
+                            })
+                            .collect()
+                    } else {
+                        content
+                    };
 
-                        if filtered.is_empty() {
-                            msg_index += 1;
-                            continue;
-                        }
-
-                        messages.push(json!({
-                            "role": "user",
-                            "content": filtered
-                        }));
+                    if filtered.is_empty() {
+                        msg_index += 1;
+                        continue;
                     }
+
+                    messages.push(json!({
+                        "role": "user",
+                        "content": filtered
+                    }));
                 }
-            }
+            },
             Message::Assistant(assistant_msg) => {
                 let mut output: Vec<Value> = Vec::new();
                 let is_different_model = assistant_msg.model != model.id
@@ -222,7 +224,8 @@ pub fn convert_responses_messages(
                             if msg_id.is_none() {
                                 msg_id = Some(format!("msg_{msg_index}"));
                             } else if msg_id.as_ref().is_some_and(|id| id.len() > 64) {
-                                msg_id = Some(format!("msg_{}", short_hash(msg_id.as_ref().unwrap())));
+                                msg_id =
+                                    Some(format!("msg_{}", short_hash(msg_id.as_ref().unwrap())));
                             }
                             output.push(json!({
                                 "type": "message",
@@ -239,15 +242,11 @@ pub fn convert_responses_messages(
 
                             // For different-model messages, set id to null to avoid pairing validation.
                             let item_id = if is_different_model
-                                && item_id_raw
-                                    .as_ref()
-                                    .is_some_and(|id| id.starts_with("fc_"))
+                                && item_id_raw.as_ref().is_some_and(|id| id.starts_with("fc_"))
                             {
                                 Value::Null
                             } else {
-                                item_id_raw
-                                    .map(|s| Value::String(s))
-                                    .unwrap_or(Value::Null)
+                                item_id_raw.map(|s| Value::String(s)).unwrap_or(Value::Null)
                             };
 
                             output.push(json!({
@@ -279,7 +278,11 @@ pub fn convert_responses_messages(
                 let has_images = tr.content.iter().any(|c| c.as_image().is_some());
                 let has_text = !text_result.is_empty();
 
-                let call_id = tr.tool_call_id.split('|').next().unwrap_or(&tr.tool_call_id);
+                let call_id = tr
+                    .tool_call_id
+                    .split('|')
+                    .next()
+                    .unwrap_or(&tr.tool_call_id);
                 messages.push(json!({
                     "type": "function_call_output",
                     "call_id": call_id,
@@ -335,8 +338,12 @@ pub fn convert_responses_tools(
             });
             // Only add strict if explicitly set (not None)
             match strict {
-                Some(val) => { t["strict"] = json!(val); }
-                None => { t["strict"] = json!(false); }
+                Some(val) => {
+                    t["strict"] = json!(val);
+                }
+                None => {
+                    t["strict"] = json!(false);
+                }
             }
             t
         })
@@ -349,8 +356,8 @@ pub fn convert_responses_tools(
 
 /// State tracking the current item being streamed from the Responses API.
 pub struct CurrentItem {
-    pub item_type: String,          // "reasoning" | "message" | "function_call"
-    pub item: Value,                // the full item JSON
+    pub item_type: String, // "reasoning" | "message" | "function_call"
+    pub item: Value,       // the full item JSON
 }
 
 /// State tracking the current content block being built.
@@ -427,10 +434,26 @@ pub fn process_responses_events(
                         });
                     }
                     "function_call" => {
-                        let call_id = item.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let args_str = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let call_id = item
+                            .get("call_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let item_id = item
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = item
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let args_str = item
+                            .get("arguments")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
 
                         *current_item = Some(CurrentItem {
                             item_type: "function_call".to_string(),
@@ -477,7 +500,9 @@ pub fn process_responses_events(
                     if ci.item_type == "reasoning" {
                         if let CurrentBlock::Thinking { thinking } = cb {
                             // Update the summary array's last part
-                            if let Some(summary_arr) = ci.item.get_mut("summary").and_then(|v| v.as_array_mut()) {
+                            if let Some(summary_arr) =
+                                ci.item.get_mut("summary").and_then(|v| v.as_array_mut())
+                            {
                                 if let Some(last_part) = summary_arr.last_mut() {
                                     if let Some(text) = last_part.get_mut("text") {
                                         let current = text.as_str().unwrap_or("");
@@ -505,7 +530,9 @@ pub fn process_responses_events(
                     if ci.item_type == "reasoning" {
                         if let CurrentBlock::Thinking { thinking } = cb {
                             // Update the summary array's last part
-                            if let Some(summary_arr) = ci.item.get_mut("summary").and_then(|v| v.as_array_mut()) {
+                            if let Some(summary_arr) =
+                                ci.item.get_mut("summary").and_then(|v| v.as_array_mut())
+                            {
                                 if let Some(last_part) = summary_arr.last_mut() {
                                     if let Some(text) = last_part.get_mut("text") {
                                         let current = text.as_str().unwrap_or("");
@@ -562,7 +589,9 @@ pub fn process_responses_events(
                                 .unwrap_or("");
                             if last_type == "output_text" {
                                 // Update the content array's last part
-                                if let Some(arr) = ci.item.get_mut("content").and_then(|v| v.as_array_mut()) {
+                                if let Some(arr) =
+                                    ci.item.get_mut("content").and_then(|v| v.as_array_mut())
+                                {
                                     if let Some(last) = arr.last_mut() {
                                         if let Some(t) = last.get_mut("text") {
                                             let current = t.as_str().unwrap_or("");
@@ -601,7 +630,9 @@ pub fn process_responses_events(
                                 .unwrap_or("");
                             if last_type == "refusal" {
                                 // Update the content array's last part
-                                if let Some(arr) = ci.item.get_mut("content").and_then(|v| v.as_array_mut()) {
+                                if let Some(arr) =
+                                    ci.item.get_mut("content").and_then(|v| v.as_array_mut())
+                                {
                                     if let Some(last) = arr.last_mut() {
                                         if let Some(r) = last.get_mut("refusal") {
                                             let current = r.as_str().unwrap_or("");
@@ -628,7 +659,12 @@ pub fn process_responses_events(
                 let delta = event.get("delta").and_then(|v| v.as_str()).unwrap_or("");
                 if let (Some(ci), Some(cb)) = (current_item.as_mut(), current_block.as_mut()) {
                     if ci.item_type == "function_call" {
-                        if let CurrentBlock::ToolCall { partial_json, arguments, .. } = cb {
+                        if let CurrentBlock::ToolCall {
+                            partial_json,
+                            arguments,
+                            ..
+                        } = cb
+                        {
                             partial_json.push_str(delta);
                             *arguments = parse_streaming_json(partial_json);
                             let block_index = output.content.len().saturating_sub(1);
@@ -645,10 +681,18 @@ pub fn process_responses_events(
                 }
             }
             "response.function_call_arguments.done" => {
-                let args_str = event.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
+                let args_str = event
+                    .get("arguments")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 if let (Some(ci), Some(cb)) = (current_item.as_mut(), current_block.as_mut()) {
                     if ci.item_type == "function_call" {
-                        if let CurrentBlock::ToolCall { partial_json, arguments, .. } = cb {
+                        if let CurrentBlock::ToolCall {
+                            partial_json,
+                            arguments,
+                            ..
+                        } = cb
+                        {
                             *partial_json = args_str.to_string();
                             *arguments = parse_streaming_json(partial_json);
                             if let Some(ContentBlock::ToolCall(tc)) = output.content.last_mut() {
@@ -679,9 +723,12 @@ pub fn process_responses_events(
                                     })
                                     .unwrap_or_default();
 
-                                if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(block_index) {
+                                if let Some(ContentBlock::Thinking(t)) =
+                                    output.content.get_mut(block_index)
+                                {
                                     t.thinking = summary_text.clone();
-                                    t.thinking_signature = Some(serde_json::to_string(&item).unwrap_or_default());
+                                    t.thinking_signature =
+                                        Some(serde_json::to_string(&item).unwrap_or_default());
                                 }
                                 stream.push(AssistantMessageEvent::ThinkingEnd {
                                     content_index: block_index,
@@ -701,10 +748,17 @@ pub fn process_responses_events(
                                     .map(|arr| {
                                         arr.iter()
                                             .filter_map(|c| {
-                                                let ct = c.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                                let ct = c
+                                                    .get("type")
+                                                    .and_then(|t| t.as_str())
+                                                    .unwrap_or("");
                                                 match ct {
-                                                    "output_text" => c.get("text").and_then(|t| t.as_str()),
-                                                    "refusal" => c.get("refusal").and_then(|t| t.as_str()),
+                                                    "output_text" => {
+                                                        c.get("text").and_then(|t| t.as_str())
+                                                    }
+                                                    "refusal" => {
+                                                        c.get("refusal").and_then(|t| t.as_str())
+                                                    }
                                                     _ => None,
                                                 }
                                             })
@@ -712,9 +766,14 @@ pub fn process_responses_events(
                                             .join("")
                                     })
                                     .unwrap_or_default();
-                                let item_id = item.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+                                let item_id = item
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string());
 
-                                if let Some(ContentBlock::Text(t)) = output.content.get_mut(block_index) {
+                                if let Some(ContentBlock::Text(t)) =
+                                    output.content.get_mut(block_index)
+                                {
                                     t.text = final_text.clone();
                                     t.text_signature = item_id;
                                 }
@@ -729,27 +788,50 @@ pub fn process_responses_events(
                     }
                     "function_call" => {
                         // Parse final arguments
-                        let args = if let Some(CurrentBlock::ToolCall { partial_json, .. }) = current_block.as_ref() {
+                        let args = if let Some(CurrentBlock::ToolCall { partial_json, .. }) =
+                            current_block.as_ref()
+                        {
                             if !partial_json.is_empty() {
                                 serde_json::from_str(partial_json).unwrap_or_else(|_| {
                                     serde_json::from_str(
-                                        item.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}")
-                                    ).unwrap_or(json!({}))
+                                        item.get("arguments")
+                                            .and_then(|v| v.as_str())
+                                            .unwrap_or("{}"),
+                                    )
+                                    .unwrap_or(json!({}))
                                 })
                             } else {
                                 serde_json::from_str(
-                                    item.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}")
-                                ).unwrap_or(json!({}))
+                                    item.get("arguments")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("{}"),
+                                )
+                                .unwrap_or(json!({}))
                             }
                         } else {
                             serde_json::from_str(
-                                item.get("arguments").and_then(|v| v.as_str()).unwrap_or("{}")
-                            ).unwrap_or(json!({}))
+                                item.get("arguments")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("{}"),
+                            )
+                            .unwrap_or(json!({}))
                         };
 
-                        let call_id = item.get("call_id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                        let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                        let call_id = item
+                            .get("call_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let item_id = item
+                            .get("id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = item
+                            .get("name")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
 
                         let tool_call = ToolCall {
                             id: format!("{call_id}|{item_id}"),
@@ -759,7 +841,9 @@ pub fn process_responses_events(
                         };
 
                         // Update the output content block
-                        if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(block_index) {
+                        if let Some(ContentBlock::ToolCall(tc)) =
+                            output.content.get_mut(block_index)
+                        {
                             tc.id = tool_call.id.clone();
                             tc.name = tool_call.name.clone();
                             tc.arguments = tool_call.arguments.clone();
@@ -783,9 +867,18 @@ pub fn process_responses_events(
                         .and_then(|d| d.get("cached_tokens"))
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
-                    let input_tokens = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let output_tokens = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let total_tokens = usage.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let input_tokens = usage
+                        .get("input_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let output_tokens = usage
+                        .get("output_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let total_tokens = usage
+                        .get("total_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
 
                     // OpenAI includes cached tokens in input_tokens, so subtract to get non-cached input
                     output.usage = Usage {
@@ -825,7 +918,10 @@ pub fn process_responses_events(
             }
             "error" => {
                 let code = event.get("code").and_then(|v| v.as_str()).unwrap_or("");
-                let message = event.get("message").and_then(|v| v.as_str()).unwrap_or("Unknown error");
+                let message = event
+                    .get("message")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Unknown error");
                 return Err(format!("Error Code {code}: {message}"));
             }
             "response.failed" => {

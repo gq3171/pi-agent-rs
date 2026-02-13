@@ -1,4 +1,4 @@
-use crate::oauth::pkce::{build_authorization_url, exchange_authorization_code, OAuthFlowStart};
+use crate::oauth::pkce::{OAuthFlowStart, build_authorization_url, exchange_authorization_code};
 use crate::oauth::types::{OAuthCredentials, OAuthProvider};
 
 /// Anthropic OAuth configuration.
@@ -66,5 +66,8 @@ pub async fn exchange_anthropic_code(
     )
     .await?;
 
-    Ok(OAuthCredentials::from_token_response(token, OAuthProvider::Anthropic))
+    Ok(OAuthCredentials::from_token_response(
+        token,
+        OAuthProvider::Anthropic,
+    ))
 }

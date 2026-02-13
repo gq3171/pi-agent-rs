@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::types::*;
 
 use crate::env_keys::get_env_api_key;
@@ -14,8 +16,8 @@ use crate::simple_options::{build_base_options, clamp_reasoning};
 use crate::sse::SseParser;
 
 use super::openai_responses_shared::{
-    convert_responses_messages, convert_responses_tools,
-    process_responses_events, ConvertResponsesMessagesOptions, ConvertResponsesToolsOptions,
+    ConvertResponsesMessagesOptions, ConvertResponsesToolsOptions, convert_responses_messages,
+    convert_responses_tools, process_responses_events,
 };
 
 // =============================================================================
@@ -48,9 +50,9 @@ const CODEX_RESPONSE_STATUSES: &[&str] = &[
 #[derive(Debug, Clone)]
 pub struct OpenAICodexResponsesOptions {
     pub base: StreamOptions,
-    pub reasoning_effort: Option<String>,   // "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-    pub reasoning_summary: Option<String>,  // "auto" | "concise" | "detailed" | "off" | "on" | null
-    pub text_verbosity: Option<String>,     // "low" | "medium" | "high"
+    pub reasoning_effort: Option<String>, // "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    pub reasoning_summary: Option<String>, // "auto" | "concise" | "detailed" | "off" | "on" | null
+    pub text_verbosity: Option<String>,   // "low" | "medium" | "high"
 }
 
 // =============================================================================
@@ -62,7 +64,10 @@ fn is_retryable_error(status: u16, error_text: &str) -> bool {
     if status == 429 || status == 500 || status == 502 || status == 503 || status == 504 {
         return true;
     }
-    let re = regex::Regex::new(r"(?i)rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused").unwrap();
+    let re = regex::Regex::new(
+        r"(?i)rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused",
+    )
+    .unwrap();
     re.is_match(error_text)
 }
 
@@ -310,8 +315,11 @@ fn parse_error_response(status: u16, body: &str) -> (String, Option<String>) {
                     })
                     .unwrap_or_default();
 
-                friendly_message =
-                    Some(format!("You have hit your ChatGPT usage limit{plan}.{when}").trim().to_string());
+                friendly_message = Some(
+                    format!("You have hit your ChatGPT usage limit{plan}.{when}")
+                        .trim()
+                        .to_string(),
+                );
             }
 
             if let Some(err_msg) = err.get("message").and_then(|v| v.as_str()) {
@@ -402,7 +410,10 @@ fn build_codex_headers(
 
     headers.insert("authorization".to_string(), format!("Bearer {token}"));
     headers.insert("chatgpt-account-id".to_string(), account_id.to_string());
-    headers.insert("openai-beta".to_string(), "responses=experimental".to_string());
+    headers.insert(
+        "openai-beta".to_string(),
+        "responses=experimental".to_string(),
+    );
     headers.insert("originator".to_string(), "pi".to_string());
 
     // Build user agent (use std::env::consts for platform info)
@@ -577,7 +588,8 @@ pub fn stream_openai_codex_responses(
             Some(r) => r,
             None => {
                 output.stop_reason = StopReason::Error;
-                output.error_message = Some(last_error.unwrap_or_else(|| "Failed after retries".to_string()));
+                output.error_message =
+                    Some(last_error.unwrap_or_else(|| "Failed after retries".to_string()));
                 stream_clone.push(AssistantMessageEvent::Error {
                     reason: StopReason::Error,
                     error: output,
@@ -875,7 +887,10 @@ mod tests {
 
     #[test]
     fn test_clamp_reasoning_effort_gpt51_codex_mini_low() {
-        assert_eq!(clamp_reasoning_effort("gpt-5.1-codex-mini", "low"), "medium");
+        assert_eq!(
+            clamp_reasoning_effort("gpt-5.1-codex-mini", "low"),
+            "medium"
+        );
     }
 
     #[test]
@@ -886,7 +901,10 @@ mod tests {
 
     #[test]
     fn test_clamp_reasoning_effort_with_org_prefix() {
-        assert_eq!(clamp_reasoning_effort("org/gpt-5.2-codex", "minimal"), "low");
+        assert_eq!(
+            clamp_reasoning_effort("org/gpt-5.2-codex", "minimal"),
+            "low"
+        );
     }
 
     #[test]
@@ -926,9 +944,8 @@ mod tests {
     fn test_extract_account_id_valid_token() {
         // Build a simple JWT with the expected claim
         let header = base64_encode(b"{\"alg\":\"HS256\",\"typ\":\"JWT\"}");
-        let payload = base64_encode(
-            br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acc_12345"}}"#,
-        );
+        let payload =
+            base64_encode(br#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acc_12345"}}"#);
         let token = format!("{header}.{payload}.signature");
         let result = extract_account_id(&token);
         assert!(result.is_ok());
@@ -946,14 +963,22 @@ mod tests {
 
     #[test]
     fn test_normalize_codex_status() {
-        assert_eq!(normalize_codex_status("completed"), Some("completed".to_string()));
-        assert_eq!(normalize_codex_status("in_progress"), Some("in_progress".to_string()));
+        assert_eq!(
+            normalize_codex_status("completed"),
+            Some("completed".to_string())
+        );
+        assert_eq!(
+            normalize_codex_status("in_progress"),
+            Some("in_progress".to_string())
+        );
         assert_eq!(normalize_codex_status("unknown"), None);
     }
 
     #[test]
     fn test_map_codex_events_done_to_completed() {
-        let events = vec![json!({"type": "response.done", "response": {"status": "completed", "usage": {}}})];
+        let events = vec![
+            json!({"type": "response.done", "response": {"status": "completed", "usage": {}}}),
+        ];
         let mapped = map_codex_events(events).unwrap();
         assert_eq!(mapped.len(), 1);
         assert_eq!(mapped[0]["type"], "response.completed");
@@ -969,7 +994,9 @@ mod tests {
 
     #[test]
     fn test_map_codex_events_failed() {
-        let events = vec![json!({"type": "response.failed", "response": {"error": {"message": "Out of tokens"}}})];
+        let events = vec![
+            json!({"type": "response.failed", "response": {"error": {"message": "Out of tokens"}}}),
+        ];
         let result = map_codex_events(events);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Out of tokens"));
@@ -1050,8 +1077,16 @@ mod tests {
         let mut i = 0;
         while i < input.len() {
             let b0 = input[i] as u32;
-            let b1 = if i + 1 < input.len() { input[i + 1] as u32 } else { 0 };
-            let b2 = if i + 2 < input.len() { input[i + 2] as u32 } else { 0 };
+            let b1 = if i + 1 < input.len() {
+                input[i + 1] as u32
+            } else {
+                0
+            };
+            let b2 = if i + 2 < input.len() {
+                input[i + 2] as u32
+            } else {
+                0
+            };
             let triple = (b0 << 16) | (b1 << 8) | b2;
 
             result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);

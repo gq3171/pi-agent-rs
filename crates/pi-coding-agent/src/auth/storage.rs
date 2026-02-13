@@ -56,10 +56,7 @@ impl AuthStorage {
         );
         env_mappings.insert("xai".to_string(), "XAI_API_KEY".to_string());
         env_mappings.insert("groq".to_string(), "GROQ_API_KEY".to_string());
-        env_mappings.insert(
-            "github-copilot".to_string(),
-            "GITHUB_TOKEN".to_string(),
-        );
+        env_mappings.insert("github-copilot".to_string(), "GITHUB_TOKEN".to_string());
         env_mappings.insert("openai-codex".to_string(), "OPENAI_API_KEY".to_string());
         env_mappings.insert("mistral".to_string(), "MISTRAL_API_KEY".to_string());
         env_mappings.insert("openrouter".to_string(), "OPENROUTER_API_KEY".to_string());
@@ -223,9 +220,7 @@ impl AuthStorage {
         let unique = uuid::Uuid::new_v4();
         let tmp_name = format!(
             ".{}.{}.tmp",
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("auth"),
+            path.file_name().and_then(|n| n.to_str()).unwrap_or("auth"),
             unique
         );
         let tmp_path = path.with_file_name(tmp_name);

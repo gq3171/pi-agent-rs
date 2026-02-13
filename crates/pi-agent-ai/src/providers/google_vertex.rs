@@ -2,10 +2,12 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::sanitize::sanitize_surrogates;
 use pi_agent_core::transform::transform_messages;
 use pi_agent_core::types::*;
@@ -35,7 +37,9 @@ pub struct GoogleVertexOptions {
 
 /// Determines whether a streamed Gemini Part should be treated as "thinking".
 fn is_thinking_part(part: &Value) -> bool {
-    part.get("thought").and_then(|v| v.as_bool()).unwrap_or(false)
+    part.get("thought")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
 }
 
 /// Retain thought signatures during streaming.
@@ -66,7 +70,10 @@ fn lazy_static_regex() -> &'static regex::Regex {
 }
 
 /// Only keep signatures from the same provider/model and with valid base64.
-fn resolve_thought_signature(is_same_provider_and_model: bool, signature: Option<&str>) -> Option<String> {
+fn resolve_thought_signature(
+    is_same_provider_and_model: bool,
+    signature: Option<&str>,
+) -> Option<String> {
     match signature {
         Some(sig) if is_same_provider_and_model && is_valid_thought_signature(sig) => {
             Some(sig.to_string())
@@ -122,7 +129,13 @@ fn map_tool_choice(choice: &str) -> &'static str {
 fn normalize_tool_call_id(id: &str) -> String {
     let normalized: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if normalized.len() > 64 {
         normalized[..64].to_string()
@@ -131,64 +144,74 @@ fn normalize_tool_call_id(id: &str) -> String {
     }
 }
 
-fn normalize_tool_call_id_for_transform(id: &str, _model: &Model, _source: &AssistantMessage) -> String {
+fn normalize_tool_call_id_for_transform(
+    id: &str,
+    _model: &Model,
+    _source: &AssistantMessage,
+) -> String {
     normalize_tool_call_id(id)
 }
 
 // ---------- Convert messages to Gemini Content[] format ----------
 
 fn convert_messages(model: &Model, context: &Context) -> Vec<Value> {
-    let transformed = transform_messages(&context.messages, model, Some(&normalize_tool_call_id_for_transform));
+    let transformed = transform_messages(
+        &context.messages,
+        model,
+        Some(&normalize_tool_call_id_for_transform),
+    );
     let mut contents: Vec<Value> = Vec::new();
 
     for msg in &transformed {
         match msg {
-            Message::User(user_msg) => {
-                match &user_msg.content {
-                    UserContent::Text(text) => {
+            Message::User(user_msg) => match &user_msg.content {
+                UserContent::Text(text) => {
+                    contents.push(json!({
+                        "role": "user",
+                        "parts": [{ "text": sanitize_surrogates(text) }]
+                    }));
+                }
+                UserContent::Blocks(blocks) => {
+                    let parts: Vec<Value> = blocks
+                        .iter()
+                        .filter_map(|item| match item {
+                            ContentBlock::Text(t) => {
+                                Some(json!({ "text": sanitize_surrogates(&t.text) }))
+                            }
+                            ContentBlock::Image(img) => {
+                                if model.input.contains(&"image".to_string()) {
+                                    Some(json!({
+                                        "inlineData": {
+                                            "mimeType": img.mime_type,
+                                            "data": img.data
+                                        }
+                                    }))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect();
+
+                    let filtered_parts: Vec<Value> = if !model.input.contains(&"image".to_string())
+                    {
+                        parts
+                            .into_iter()
+                            .filter(|p| p.get("text").is_some())
+                            .collect()
+                    } else {
+                        parts
+                    };
+
+                    if !filtered_parts.is_empty() {
                         contents.push(json!({
                             "role": "user",
-                            "parts": [{ "text": sanitize_surrogates(text) }]
+                            "parts": filtered_parts
                         }));
                     }
-                    UserContent::Blocks(blocks) => {
-                        let parts: Vec<Value> = blocks
-                            .iter()
-                            .filter_map(|item| match item {
-                                ContentBlock::Text(t) => {
-                                    Some(json!({ "text": sanitize_surrogates(&t.text) }))
-                                }
-                                ContentBlock::Image(img) => {
-                                    if model.input.contains(&"image".to_string()) {
-                                        Some(json!({
-                                            "inlineData": {
-                                                "mimeType": img.mime_type,
-                                                "data": img.data
-                                            }
-                                        }))
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            })
-                            .collect();
-
-                        let filtered_parts: Vec<Value> = if !model.input.contains(&"image".to_string()) {
-                            parts.into_iter().filter(|p| p.get("text").is_some()).collect()
-                        } else {
-                            parts
-                        };
-
-                        if !filtered_parts.is_empty() {
-                            contents.push(json!({
-                                "role": "user",
-                                "parts": filtered_parts
-                            }));
-                        }
-                    }
                 }
-            }
+            },
             Message::Assistant(assistant_msg) => {
                 let mut parts: Vec<Value> = Vec::new();
                 let is_same_provider_and_model =
@@ -277,22 +300,20 @@ fn convert_messages(model: &Model, context: &Context) -> Vec<Value> {
                 }
             }
             Message::ToolResult(tr) => {
-                let text_content: Vec<&TextContent> = tr
-                    .content
-                    .iter()
-                    .filter_map(|c| c.as_text())
-                    .collect();
+                let text_content: Vec<&TextContent> =
+                    tr.content.iter().filter_map(|c| c.as_text()).collect();
                 let text_result: String = text_content
                     .iter()
                     .map(|c| c.text.as_str())
                     .collect::<Vec<_>>()
                     .join("\n");
 
-                let image_content: Vec<&ImageContent> = if model.input.contains(&"image".to_string()) {
-                    tr.content.iter().filter_map(|c| c.as_image()).collect()
-                } else {
-                    Vec::new()
-                };
+                let image_content: Vec<&ImageContent> =
+                    if model.input.contains(&"image".to_string()) {
+                        tr.content.iter().filter_map(|c| c.as_image()).collect()
+                    } else {
+                        Vec::new()
+                    };
 
                 let has_text = !text_result.is_empty();
                 let has_images = !image_content.is_empty();
@@ -438,7 +459,10 @@ fn resolve_location(options: &GoogleVertexOptions) -> Result<String, String> {
         }
     }
 
-    Err("Vertex AI requires a location. Set GOOGLE_CLOUD_LOCATION or pass location in options.".to_string())
+    Err(
+        "Vertex AI requires a location. Set GOOGLE_CLOUD_LOCATION or pass location in options."
+            .to_string(),
+    )
 }
 
 // ---------- Obtain an access token for Vertex AI ----------
@@ -448,7 +472,10 @@ fn resolve_location(options: &GoogleVertexOptions) -> Result<String, String> {
 async fn get_access_token(options: &GoogleVertexOptions) -> Result<String, String> {
     // Check if an explicit access token was provided in headers
     if let Some(headers) = &options.base.headers {
-        if let Some(auth) = headers.get("authorization").or_else(|| headers.get("Authorization")) {
+        if let Some(auth) = headers
+            .get("authorization")
+            .or_else(|| headers.get("Authorization"))
+        {
             if let Some(token) = auth.strip_prefix("Bearer ") {
                 if !token.is_empty() {
                     return Ok(token.to_string());
@@ -498,11 +525,7 @@ async fn get_access_token(options: &GoogleVertexOptions) -> Result<String, Strin
 
 // ---------- Build request parameters ----------
 
-fn build_params(
-    model: &Model,
-    context: &Context,
-    options: &GoogleVertexOptions,
-) -> Value {
+fn build_params(model: &Model, context: &Context, options: &GoogleVertexOptions) -> Value {
     let contents = convert_messages(model, context);
 
     let mut generation_config: Value = json!({});
@@ -515,7 +538,10 @@ fn build_params(
 
     let mut config: Value = json!({});
 
-    if generation_config.as_object().map_or(false, |o| !o.is_empty()) {
+    if generation_config
+        .as_object()
+        .map_or(false, |o| !o.is_empty())
+    {
         if let Some(obj) = generation_config.as_object() {
             for (k, v) in obj {
                 config[k] = v.clone();
@@ -653,7 +679,11 @@ fn get_gemini3_thinking_level(effort: &ThinkingLevel, model: &Model) -> String {
 }
 
 /// Get the Google thinking budget for older (non-Gemini 3) models.
-fn get_google_budget(model: &Model, effort: &ThinkingLevel, custom_budgets: Option<&ThinkingBudgets>) -> i64 {
+fn get_google_budget(
+    model: &Model,
+    effort: &ThinkingLevel,
+    custom_budgets: Option<&ThinkingBudgets>,
+) -> i64 {
     let clamped = clamp_reasoning(effort);
 
     if let Some(budgets) = custom_budgets {
@@ -759,11 +789,7 @@ pub fn stream_google_vertex(
             }
         };
 
-        let headers = build_headers(
-            &model,
-            &access_token,
-            options.base.headers.as_ref(),
-        );
+        let headers = build_headers(&model, &access_token, options.base.headers.as_ref());
 
         let params = build_params(&model, &context, &options);
         let url = build_stream_url(&model, &project, &location);
@@ -817,7 +843,11 @@ pub fn stream_google_vertex(
 
         let mut current_block: Option<CurrentBlock> = None;
         let block_index = |output: &AssistantMessage| -> usize {
-            if output.content.is_empty() { 0 } else { output.content.len() - 1 }
+            if output.content.is_empty() {
+                0
+            } else {
+                output.content.len() - 1
+            }
         };
 
         // Parse SSE stream
@@ -886,9 +916,8 @@ pub fn stream_google_vertex(
                                 // Handle text parts (both regular text and thinking)
                                 if let Some(text) = part.get("text").and_then(|t| t.as_str()) {
                                     let is_thinking = is_thinking_part(part);
-                                    let thought_sig = part
-                                        .get("thoughtSignature")
-                                        .and_then(|s| s.as_str());
+                                    let thought_sig =
+                                        part.get("thoughtSignature").and_then(|s| s.as_str());
 
                                     let needs_new_block = match &current_block {
                                         None => true,
@@ -902,18 +931,22 @@ pub fn stream_google_vertex(
                                             let ci = block_index(&output);
                                             match cb {
                                                 CurrentBlock::Text { text, .. } => {
-                                                    stream_clone.push(AssistantMessageEvent::TextEnd {
-                                                        content_index: ci,
-                                                        content: text.clone(),
-                                                        partial: output.clone(),
-                                                    });
+                                                    stream_clone.push(
+                                                        AssistantMessageEvent::TextEnd {
+                                                            content_index: ci,
+                                                            content: text.clone(),
+                                                            partial: output.clone(),
+                                                        },
+                                                    );
                                                 }
                                                 CurrentBlock::Thinking { thinking, .. } => {
-                                                    stream_clone.push(AssistantMessageEvent::ThinkingEnd {
-                                                        content_index: ci,
-                                                        content: thinking.clone(),
-                                                        partial: output.clone(),
-                                                    });
+                                                    stream_clone.push(
+                                                        AssistantMessageEvent::ThinkingEnd {
+                                                            content_index: ci,
+                                                            content: thinking.clone(),
+                                                            partial: output.clone(),
+                                                        },
+                                                    );
                                                 }
                                             }
                                         }
@@ -923,15 +956,19 @@ pub fn stream_google_vertex(
                                                 thinking: String::new(),
                                                 thinking_signature: None,
                                             });
-                                            output.content.push(ContentBlock::Thinking(ThinkingContent {
-                                                thinking: String::new(),
-                                                thinking_signature: None,
-                                            }));
+                                            output.content.push(ContentBlock::Thinking(
+                                                ThinkingContent {
+                                                    thinking: String::new(),
+                                                    thinking_signature: None,
+                                                },
+                                            ));
                                             let ci = block_index(&output);
-                                            stream_clone.push(AssistantMessageEvent::ThinkingStart {
-                                                content_index: ci,
-                                                partial: output.clone(),
-                                            });
+                                            stream_clone.push(
+                                                AssistantMessageEvent::ThinkingStart {
+                                                    content_index: ci,
+                                                    partial: output.clone(),
+                                                },
+                                            );
                                         } else {
                                             current_block = Some(CurrentBlock::Text {
                                                 text: String::new(),
@@ -961,15 +998,19 @@ pub fn stream_google_vertex(
                                                 thinking_signature.as_deref(),
                                                 thought_sig,
                                             );
-                                            if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci) {
+                                            if let Some(ContentBlock::Thinking(t)) =
+                                                output.content.get_mut(ci)
+                                            {
                                                 t.thinking.push_str(text);
                                                 t.thinking_signature = thinking_signature.clone();
                                             }
-                                            stream_clone.push(AssistantMessageEvent::ThinkingDelta {
-                                                content_index: ci,
-                                                delta: text.to_string(),
-                                                partial: output.clone(),
-                                            });
+                                            stream_clone.push(
+                                                AssistantMessageEvent::ThinkingDelta {
+                                                    content_index: ci,
+                                                    delta: text.to_string(),
+                                                    partial: output.clone(),
+                                                },
+                                            );
                                         }
                                         Some(CurrentBlock::Text {
                                             text: block_text,
@@ -980,7 +1021,9 @@ pub fn stream_google_vertex(
                                                 text_signature.as_deref(),
                                                 thought_sig,
                                             );
-                                            if let Some(ContentBlock::Text(t)) = output.content.get_mut(ci) {
+                                            if let Some(ContentBlock::Text(t)) =
+                                                output.content.get_mut(ci)
+                                            {
                                                 t.text.push_str(text);
                                                 t.text_signature = text_signature.clone();
                                             }
@@ -1007,19 +1050,28 @@ pub fn stream_google_vertex(
                                                 });
                                             }
                                             CurrentBlock::Thinking { thinking, .. } => {
-                                                stream_clone.push(AssistantMessageEvent::ThinkingEnd {
-                                                    content_index: ci,
-                                                    content: thinking.clone(),
-                                                    partial: output.clone(),
-                                                });
+                                                stream_clone.push(
+                                                    AssistantMessageEvent::ThinkingEnd {
+                                                        content_index: ci,
+                                                        content: thinking.clone(),
+                                                        partial: output.clone(),
+                                                    },
+                                                );
                                             }
                                         }
                                         current_block = None;
                                     }
 
-                                    let fc_name = fc.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                                    let fc_name = fc
+                                        .get("name")
+                                        .and_then(|n| n.as_str())
+                                        .unwrap_or("")
+                                        .to_string();
                                     let fc_args = fc.get("args").cloned().unwrap_or(json!({}));
-                                    let fc_id = fc.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
+                                    let fc_id = fc
+                                        .get("id")
+                                        .and_then(|i| i.as_str())
+                                        .map(|s| s.to_string());
 
                                     let thought_sig = part
                                         .get("thoughtSignature")
@@ -1040,7 +1092,8 @@ pub fn stream_google_vertex(
                                     };
 
                                     let tool_call_id = if needs_new_id {
-                                        let counter = TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed);
+                                        let counter =
+                                            TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed);
                                         let now = chrono::Utc::now().timestamp_millis();
                                         format!("{}_{now}_{counter}", fc_name)
                                     } else {
@@ -1054,7 +1107,9 @@ pub fn stream_google_vertex(
                                         thought_signature: thought_sig,
                                     };
 
-                                    output.content.push(ContentBlock::ToolCall(tool_call.clone()));
+                                    output
+                                        .content
+                                        .push(ContentBlock::ToolCall(tool_call.clone()));
                                     let ci = block_index(&output);
 
                                     stream_clone.push(AssistantMessageEvent::ToolCallStart {
@@ -1076,9 +1131,14 @@ pub fn stream_google_vertex(
                         }
 
                         // Handle finish reason
-                        if let Some(reason) = candidate.get("finishReason").and_then(|r| r.as_str()) {
+                        if let Some(reason) = candidate.get("finishReason").and_then(|r| r.as_str())
+                        {
                             output.stop_reason = map_stop_reason(reason);
-                            if output.content.iter().any(|b| matches!(b, ContentBlock::ToolCall(_))) {
+                            if output
+                                .content
+                                .iter()
+                                .any(|b| matches!(b, ContentBlock::ToolCall(_)))
+                            {
                                 output.stop_reason = StopReason::ToolUse;
                             }
                         }
@@ -1299,7 +1359,10 @@ mod tests {
         assert_eq!(map_stop_reason("STOP"), StopReason::Stop);
         assert_eq!(map_stop_reason("MAX_TOKENS"), StopReason::Length);
         assert_eq!(map_stop_reason("SAFETY"), StopReason::Error);
-        assert_eq!(map_stop_reason("MALFORMED_FUNCTION_CALL"), StopReason::Error);
+        assert_eq!(
+            map_stop_reason("MALFORMED_FUNCTION_CALL"),
+            StopReason::Error
+        );
         assert_eq!(map_stop_reason("UNKNOWN_REASON"), StopReason::Error);
     }
 
@@ -1411,7 +1474,10 @@ mod tests {
         assert_eq!(params["temperature"], 0.7);
         assert_eq!(params["maxOutputTokens"], 1024);
         assert!(params.get("systemInstruction").is_some());
-        assert_eq!(params["systemInstruction"]["parts"][0]["text"], "You are helpful.");
+        assert_eq!(
+            params["systemInstruction"]["parts"][0]["text"],
+            "You are helpful."
+        );
     }
 
     #[test]
@@ -1494,16 +1560,25 @@ mod tests {
         };
         let params = build_params(&model, &context, &options);
         assert!(params.get("tools").is_some());
-        assert_eq!(params["toolConfig"]["functionCallingConfig"]["mode"], "AUTO");
+        assert_eq!(
+            params["toolConfig"]["functionCallingConfig"]["mode"],
+            "AUTO"
+        );
     }
 
     #[test]
     fn test_get_google_budget_25_pro() {
         let mut model = test_vertex_model();
         model.id = "gemini-2.5-pro".to_string();
-        assert_eq!(get_google_budget(&model, &ThinkingLevel::Minimal, None), 128);
+        assert_eq!(
+            get_google_budget(&model, &ThinkingLevel::Minimal, None),
+            128
+        );
         assert_eq!(get_google_budget(&model, &ThinkingLevel::Low, None), 2048);
-        assert_eq!(get_google_budget(&model, &ThinkingLevel::Medium, None), 8192);
+        assert_eq!(
+            get_google_budget(&model, &ThinkingLevel::Medium, None),
+            8192
+        );
         assert_eq!(get_google_budget(&model, &ThinkingLevel::High, None), 32768);
     }
 
@@ -1511,9 +1586,15 @@ mod tests {
     fn test_get_google_budget_25_flash() {
         let mut model = test_vertex_model();
         model.id = "gemini-2.5-flash".to_string();
-        assert_eq!(get_google_budget(&model, &ThinkingLevel::Minimal, None), 128);
+        assert_eq!(
+            get_google_budget(&model, &ThinkingLevel::Minimal, None),
+            128
+        );
         assert_eq!(get_google_budget(&model, &ThinkingLevel::Low, None), 2048);
-        assert_eq!(get_google_budget(&model, &ThinkingLevel::Medium, None), 8192);
+        assert_eq!(
+            get_google_budget(&model, &ThinkingLevel::Medium, None),
+            8192
+        );
         assert_eq!(get_google_budget(&model, &ThinkingLevel::High, None), 24576);
     }
 
@@ -1526,7 +1607,10 @@ mod tests {
             medium: Some(4096),
             high: Some(16384),
         };
-        assert_eq!(get_google_budget(&model, &ThinkingLevel::Medium, Some(&budgets)), 4096);
+        assert_eq!(
+            get_google_budget(&model, &ThinkingLevel::Medium, Some(&budgets)),
+            4096
+        );
     }
 
     #[test]
@@ -1540,28 +1624,58 @@ mod tests {
     fn test_gemini3_thinking_level_pro() {
         let mut model = test_vertex_model();
         model.id = "gemini-3-pro".to_string();
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Minimal, &model), "LOW");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Low, &model), "LOW");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Medium, &model), "HIGH");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::High, &model), "HIGH");
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Minimal, &model),
+            "LOW"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Low, &model),
+            "LOW"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Medium, &model),
+            "HIGH"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::High, &model),
+            "HIGH"
+        );
     }
 
     #[test]
     fn test_gemini3_thinking_level_flash() {
         let mut model = test_vertex_model();
         model.id = "gemini-3-flash".to_string();
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Minimal, &model), "MINIMAL");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Low, &model), "LOW");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::Medium, &model), "MEDIUM");
-        assert_eq!(get_gemini3_thinking_level(&ThinkingLevel::High, &model), "HIGH");
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Minimal, &model),
+            "MINIMAL"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Low, &model),
+            "LOW"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::Medium, &model),
+            "MEDIUM"
+        );
+        assert_eq!(
+            get_gemini3_thinking_level(&ThinkingLevel::High, &model),
+            "HIGH"
+        );
     }
 
     #[test]
     fn test_is_thinking_part() {
-        assert!(is_thinking_part(&json!({ "thought": true, "text": "thinking..." })));
+        assert!(is_thinking_part(
+            &json!({ "thought": true, "text": "thinking..." })
+        ));
         assert!(!is_thinking_part(&json!({ "text": "regular text" })));
-        assert!(!is_thinking_part(&json!({ "thought": false, "text": "not thinking" })));
-        assert!(!is_thinking_part(&json!({ "text": "text", "thoughtSignature": "abc=" })));
+        assert!(!is_thinking_part(
+            &json!({ "thought": false, "text": "not thinking" })
+        ));
+        assert!(!is_thinking_part(
+            &json!({ "text": "text", "thoughtSignature": "abc=" })
+        ));
     }
 
     #[test]
@@ -1587,24 +1701,26 @@ mod tests {
 
     #[test]
     fn test_convert_tools() {
-        let tools = vec![
-            Tool {
-                name: "search".to_string(),
-                description: "Search the web".to_string(),
-                parameters: json!({
-                    "type": "object",
-                    "properties": {
-                        "query": { "type": "string" }
-                    },
-                    "required": ["query"]
-                }),
-            },
-        ];
+        let tools = vec![Tool {
+            name: "search".to_string(),
+            description: "Search the web".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string" }
+                },
+                "required": ["query"]
+            }),
+        }];
         let result = convert_tools(&tools);
         assert!(result.is_array());
         let arr = result.as_array().unwrap();
         assert_eq!(arr.len(), 1);
-        let decls = arr[0].get("functionDeclarations").unwrap().as_array().unwrap();
+        let decls = arr[0]
+            .get("functionDeclarations")
+            .unwrap()
+            .as_array()
+            .unwrap();
         assert_eq!(decls.len(), 1);
         assert_eq!(decls[0]["name"], "search");
         assert!(decls[0].get("parametersJsonSchema").is_some());

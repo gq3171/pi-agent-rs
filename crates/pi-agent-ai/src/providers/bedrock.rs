@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use base64::Engine;
 use futures::StreamExt;
 use hmac::{Hmac, Mac};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::json_parse::parse_streaming_json;
 use pi_agent_core::sanitize::sanitize_surrogates;
 use pi_agent_core::transform::transform_messages;
@@ -50,8 +52,7 @@ fn sha256_hash(data: &[u8]) -> String {
 }
 
 fn hmac_sha256(key: &[u8], msg: &[u8]) -> Vec<u8> {
-    let mut mac = HmacSha256::new_from_slice(key)
-        .expect("HMAC can take key of any size");
+    let mut mac = HmacSha256::new_from_slice(key).expect("HMAC can take key of any size");
     mac.update(msg);
     mac.finalize().into_bytes().to_vec()
 }
@@ -130,7 +131,8 @@ fn sign_request(
     let payload_hash = sha256_hash(body);
 
     // Build canonical headers
-    let mut signed_header_names = vec!["content-type", "host", "x-amz-content-sha256", "x-amz-date"];
+    let mut signed_header_names =
+        vec!["content-type", "host", "x-amz-content-sha256", "x-amz-date"];
     if session_token.is_some() {
         signed_header_names.push("x-amz-security-token");
     }
@@ -241,7 +243,13 @@ fn supports_thinking_signature(model: &Model) -> bool {
 fn normalize_tool_call_id(id: &str) -> String {
     let sanitized: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if sanitized.len() > 64 {
         sanitized[..64].to_string()
@@ -250,7 +258,11 @@ fn normalize_tool_call_id(id: &str) -> String {
     }
 }
 
-fn normalize_tool_call_id_for_transform(id: &str, _model: &Model, _source: &AssistantMessage) -> String {
+fn normalize_tool_call_id_for_transform(
+    id: &str,
+    _model: &Model,
+    _source: &AssistantMessage,
+) -> String {
     normalize_tool_call_id(id)
 }
 
@@ -322,7 +334,8 @@ fn convert_messages(
     model: &Model,
     cache_retention: &CacheRetention,
 ) -> Vec<Value> {
-    let transformed = transform_messages(messages, model, Some(&normalize_tool_call_id_for_transform));
+    let transformed =
+        transform_messages(messages, model, Some(&normalize_tool_call_id_for_transform));
     let mut result: Vec<Value> = Vec::new();
 
     let mut i = 0;
@@ -342,9 +355,9 @@ fn convert_messages(
                                 ContentBlock::Text(t) => {
                                     Some(json!({"text": sanitize_surrogates(&t.text)}))
                                 }
-                                ContentBlock::Image(img) => {
-                                    Some(json!({"image": create_image_block(&img.mime_type, &img.data)}))
-                                }
+                                ContentBlock::Image(img) => Some(
+                                    json!({"image": create_image_block(&img.mime_type, &img.data)}),
+                                ),
                                 _ => None,
                             })
                             .collect();
@@ -451,7 +464,10 @@ fn convert_messages(
     }
 
     // Add cache point to the last user message for supported Claude models when caching is enabled
-    if *cache_retention != CacheRetention::None && supports_prompt_caching(model) && !result.is_empty() {
+    if *cache_retention != CacheRetention::None
+        && supports_prompt_caching(model)
+        && !result.is_empty()
+    {
         if let Some(last_msg) = result.last_mut() {
             if last_msg.get("role").and_then(|r| r.as_str()) == Some("user") {
                 if let Some(content) = last_msg.get_mut("content") {
@@ -494,7 +510,10 @@ fn build_tool_result_block(tr: &ToolResultMessage) -> Value {
 
 // ---------- Convert tool config ----------
 
-fn convert_tool_config(tools: Option<&[Tool]>, tool_choice: &Option<BedrockToolChoice>) -> Option<Value> {
+fn convert_tool_config(
+    tools: Option<&[Tool]>,
+    tool_choice: &Option<BedrockToolChoice>,
+) -> Option<Value> {
     let tools = match tools {
         Some(t) if !t.is_empty() => t,
         _ => return None,
@@ -534,10 +553,7 @@ fn convert_tool_config(tools: Option<&[Tool]>, tool_choice: &Option<BedrockToolC
 
 // ---------- Build additional model request fields ----------
 
-fn build_additional_model_request_fields(
-    model: &Model,
-    options: &BedrockOptions,
-) -> Option<Value> {
+fn build_additional_model_request_fields(model: &Model, options: &BedrockOptions) -> Option<Value> {
     let reasoning = match &options.reasoning {
         Some(r) => r,
         None => return None,
@@ -560,7 +576,8 @@ fn build_additional_model_request_fields(
                 ("medium", 8192),
                 ("high", 16384),
                 ("xhigh", 16384),
-            ].into();
+            ]
+            .into();
 
             let level_str = match reasoning {
                 ThinkingLevel::Xhigh => "high",
@@ -580,7 +597,11 @@ fn build_additional_model_request_fields(
                     "high" => budgets.high,
                     _ => None,
                 })
-                .unwrap_or_else(|| *default_budgets.get(&reasoning.to_string().as_str()).unwrap_or(&16384));
+                .unwrap_or_else(|| {
+                    *default_budgets
+                        .get(&reasoning.to_string().as_str())
+                        .unwrap_or(&16384)
+                });
 
             json!({
                 "thinking": {
@@ -619,7 +640,10 @@ fn decode_event_stream_messages(buf: &[u8]) -> (Vec<(HashMap<String, String>, Ve
 
     while offset + 12 <= buf.len() {
         let total_len = u32::from_be_bytes([
-            buf[offset], buf[offset + 1], buf[offset + 2], buf[offset + 3],
+            buf[offset],
+            buf[offset + 1],
+            buf[offset + 2],
+            buf[offset + 3],
         ]) as usize;
 
         if total_len < 16 || offset + total_len > buf.len() {
@@ -627,7 +651,10 @@ fn decode_event_stream_messages(buf: &[u8]) -> (Vec<(HashMap<String, String>, Ve
         }
 
         let headers_len = u32::from_be_bytes([
-            buf[offset + 4], buf[offset + 5], buf[offset + 6], buf[offset + 7],
+            buf[offset + 4],
+            buf[offset + 5],
+            buf[offset + 6],
+            buf[offset + 7],
         ]) as usize;
 
         // Skip prelude CRC (4 bytes at offset+8)
@@ -707,17 +734,31 @@ fn decode_event_headers(data: &[u8]) -> HashMap<String, String> {
                 // Type 9 (uuid): 16 bytes
                 match value_type {
                     0 | 1 => {}
-                    2 => { pos += 1; }
-                    3 => { pos += 2; }
-                    4 => { pos += 4; }
-                    5 | 8 => { pos += 8; }
+                    2 => {
+                        pos += 1;
+                    }
+                    3 => {
+                        pos += 2;
+                    }
+                    4 => {
+                        pos += 4;
+                    }
+                    5 | 8 => {
+                        pos += 8;
+                    }
                     6 => {
-                        if pos + 2 > data.len() { break; }
+                        if pos + 2 > data.len() {
+                            break;
+                        }
                         let len = u16::from_be_bytes([data[pos], data[pos + 1]]) as usize;
                         pos += 2 + len;
                     }
-                    9 => { pos += 16; }
-                    _ => { break; }
+                    9 => {
+                        pos += 16;
+                    }
+                    _ => {
+                        break;
+                    }
                 }
             }
         }
@@ -745,8 +786,16 @@ fn handle_content_block_start(
 
     if let Some(start) = start {
         if let Some(tool_use) = start.get("toolUse") {
-            let id = tool_use.get("toolUseId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let name = tool_use.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let id = tool_use
+                .get("toolUseId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let name = tool_use
+                .get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
 
             let block = ContentBlock::ToolCall(ToolCall {
                 id,
@@ -777,7 +826,9 @@ fn handle_content_block_delta(
     let content_block_index = event.get("contentBlockIndex").and_then(|v| v.as_u64());
     let delta = event.get("delta");
 
-    let block_pos = blocks.iter().position(|b| b.content_block_index == content_block_index);
+    let block_pos = blocks
+        .iter()
+        .position(|b| b.content_block_index == content_block_index);
 
     if let Some(delta) = delta {
         // Text delta
@@ -861,8 +912,14 @@ fn handle_content_block_delta(
                 });
             }
 
-            let reasoning_text = reasoning.get("text").and_then(|v| v.as_str()).map(|s| s.to_string());
-            let reasoning_sig = reasoning.get("signature").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let reasoning_text = reasoning
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let reasoning_sig = reasoning
+                .get("signature")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
 
             if let Some(text) = &reasoning_text {
                 if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci) {
@@ -895,7 +952,9 @@ fn handle_content_block_stop(
     stream: &AssistantMessageEventStream,
 ) {
     let content_block_index = event.get("contentBlockIndex").and_then(|v| v.as_u64());
-    let pos = blocks.iter().position(|b| b.content_block_index == content_block_index);
+    let pos = blocks
+        .iter()
+        .position(|b| b.content_block_index == content_block_index);
 
     if let Some(pos) = pos {
         let ci = find_content_index(blocks, pos, output);
@@ -950,10 +1009,22 @@ fn handle_content_block_stop(
 
 fn handle_metadata(event: &Value, model: &Model, output: &mut AssistantMessage) {
     if let Some(usage) = event.get("usage") {
-        output.usage.input = usage.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        output.usage.output = usage.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        output.usage.cache_read = usage.get("cacheReadInputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-        output.usage.cache_write = usage.get("cacheWriteInputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+        output.usage.input = usage
+            .get("inputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        output.usage.output = usage
+            .get("outputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        output.usage.cache_read = usage
+            .get("cacheReadInputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        output.usage.cache_write = usage
+            .get("cacheWriteInputTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         output.usage.total_tokens = usage
             .get("totalTokens")
             .and_then(|v| v.as_u64())
@@ -1010,11 +1081,9 @@ pub fn stream_bedrock(
 
         // Build request body
         let messages = convert_messages(&context.messages, &model, &cache_retention);
-        let system = build_system_prompt(context.system_prompt.as_deref(), &model, &cache_retention);
-        let tool_config = convert_tool_config(
-            context.tools.as_deref(),
-            &options.tool_choice,
-        );
+        let system =
+            build_system_prompt(context.system_prompt.as_deref(), &model, &cache_retention);
+        let tool_config = convert_tool_config(context.tools.as_deref(), &options.tool_choice);
         let additional_fields = build_additional_model_request_fields(&model, &options);
 
         let mut body = json!({
@@ -1033,7 +1102,10 @@ pub fn stream_bedrock(
         if let Some(temp) = options.base.temperature {
             inference_config["temperature"] = json!(temp);
         }
-        if inference_config.as_object().map_or(false, |o| !o.is_empty()) {
+        if inference_config
+            .as_object()
+            .map_or(false, |o| !o.is_empty())
+        {
             body["inferenceConfig"] = inference_config;
         }
 
@@ -1158,7 +1230,9 @@ pub fn stream_bedrock(
             }
 
             for (headers, payload) in messages {
-                let event_type = headers.get(":event-type").cloned()
+                let event_type = headers
+                    .get(":event-type")
+                    .cloned()
                     .or_else(|| headers.get(":exception-type").cloned());
                 let message_type = headers.get(":message-type").cloned();
 
@@ -1206,20 +1280,29 @@ pub fn stream_bedrock(
                         handle_content_block_stop(&data, &mut blocks, &mut output, &stream_clone);
                     }
                     Some("messageStop") => {
-                        let stop_reason = data.get("stopReason").and_then(|v| v.as_str()).unwrap_or("end_turn");
+                        let stop_reason = data
+                            .get("stopReason")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("end_turn");
                         output.stop_reason = map_stop_reason(stop_reason);
                     }
                     Some("metadata") => {
                         handle_metadata(&data, &model, &mut output);
                     }
-                    Some("internalServerException") | Some("modelStreamErrorException")
-                    | Some("validationException") | Some("throttlingException")
+                    Some("internalServerException")
+                    | Some("modelStreamErrorException")
+                    | Some("validationException")
+                    | Some("throttlingException")
                     | Some("serviceUnavailableException") => {
-                        let error_msg = data.get("message")
+                        let error_msg = data
+                            .get("message")
                             .and_then(|v| v.as_str())
                             .unwrap_or("Unknown error");
                         output.stop_reason = StopReason::Error;
-                        output.error_message = Some(format!("{}: {error_msg}", event_type.as_deref().unwrap_or("error")));
+                        output.error_message = Some(format!(
+                            "{}: {error_msg}",
+                            event_type.as_deref().unwrap_or("error")
+                        ));
                         stream_clone.push(AssistantMessageEvent::Error {
                             reason: StopReason::Error,
                             error: output,
@@ -1470,9 +1553,13 @@ mod tests {
 
     #[test]
     fn test_supports_adaptive_thinking() {
-        assert!(supports_adaptive_thinking("anthropic.claude-opus-4-6-20250610-v1:0"));
+        assert!(supports_adaptive_thinking(
+            "anthropic.claude-opus-4-6-20250610-v1:0"
+        ));
         assert!(supports_adaptive_thinking("some-model-opus-4.6-thing"));
-        assert!(!supports_adaptive_thinking("anthropic.claude-3-5-sonnet-20241022-v2:0"));
+        assert!(!supports_adaptive_thinking(
+            "anthropic.claude-3-5-sonnet-20241022-v2:0"
+        ));
         assert!(!supports_adaptive_thinking("amazon.nova-2-lite-v1:0"));
     }
 
@@ -1502,7 +1589,10 @@ mod tests {
         assert_eq!(map_stop_reason("end_turn"), StopReason::Stop);
         assert_eq!(map_stop_reason("stop_sequence"), StopReason::Stop);
         assert_eq!(map_stop_reason("max_tokens"), StopReason::Length);
-        assert_eq!(map_stop_reason("model_context_window_exceeded"), StopReason::Length);
+        assert_eq!(
+            map_stop_reason("model_context_window_exceeded"),
+            StopReason::Length
+        );
         assert_eq!(map_stop_reason("tool_use"), StopReason::ToolUse);
         assert_eq!(map_stop_reason("unknown_thing"), StopReason::Error);
     }
@@ -1553,7 +1643,12 @@ mod tests {
         assert!(config.is_none());
 
         // With tool choice pointing to a specific tool
-        let config = convert_tool_config(Some(&tools), &Some(BedrockToolChoice::Tool { name: "search".to_string() }));
+        let config = convert_tool_config(
+            Some(&tools),
+            &Some(BedrockToolChoice::Tool {
+                name: "search".to_string(),
+            }),
+        );
         assert!(config.is_some());
         let config = config.unwrap();
         assert_eq!(config["toolChoice"]["tool"]["name"], "search");
@@ -1591,12 +1686,10 @@ mod tests {
     #[test]
     fn test_convert_messages_basic() {
         let model = test_model();
-        let messages = vec![
-            Message::User(UserMessage {
-                content: UserContent::Text("Hello".to_string()),
-                timestamp: 0,
-            }),
-        ];
+        let messages = vec![Message::User(UserMessage {
+            content: UserContent::Text("Hello".to_string()),
+            timestamp: 0,
+        })];
         let result = convert_messages(&messages, &model, &CacheRetention::Short);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0]["role"], "user");
@@ -1678,27 +1771,25 @@ mod tests {
     #[test]
     fn test_convert_messages_thinking_with_signature_for_claude() {
         let model = test_model();
-        let messages = vec![
-            Message::Assistant(AssistantMessage {
-                content: vec![
-                    ContentBlock::Thinking(ThinkingContent {
-                        thinking: "Let me think...".to_string(),
-                        thinking_signature: Some("sig123".to_string()),
-                    }),
-                    ContentBlock::Text(TextContent {
-                        text: "Here is my answer".to_string(),
-                        text_signature: None,
-                    }),
-                ],
-                api: "bedrock-converse-stream".to_string(),
-                provider: "amazon-bedrock".to_string(),
-                model: "anthropic.claude-3-5-sonnet-20241022-v2:0".to_string(),
-                usage: Usage::default(),
-                stop_reason: StopReason::Stop,
-                error_message: None,
-                timestamp: 0,
-            }),
-        ];
+        let messages = vec![Message::Assistant(AssistantMessage {
+            content: vec![
+                ContentBlock::Thinking(ThinkingContent {
+                    thinking: "Let me think...".to_string(),
+                    thinking_signature: Some("sig123".to_string()),
+                }),
+                ContentBlock::Text(TextContent {
+                    text: "Here is my answer".to_string(),
+                    text_signature: None,
+                }),
+            ],
+            api: "bedrock-converse-stream".to_string(),
+            provider: "amazon-bedrock".to_string(),
+            model: "anthropic.claude-3-5-sonnet-20241022-v2:0".to_string(),
+            usage: Usage::default(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: 0,
+        })];
 
         let result = convert_messages(&messages, &model, &CacheRetention::None);
         assert_eq!(result.len(), 1);
@@ -1829,7 +1920,7 @@ mod tests {
         let header_bytes: Vec<u8> = vec![
             4, // name length
             b't', b'e', b's', b't', // name
-            7, // string type
+            7,    // string type
             0, 5, // value length (big-endian)
             b'h', b'e', b'l', b'l', b'o', // value
         ];
@@ -1841,7 +1932,10 @@ mod tests {
     fn test_map_thinking_level_to_effort() {
         assert_eq!(map_thinking_level_to_effort(&ThinkingLevel::Minimal), "low");
         assert_eq!(map_thinking_level_to_effort(&ThinkingLevel::Low), "low");
-        assert_eq!(map_thinking_level_to_effort(&ThinkingLevel::Medium), "medium");
+        assert_eq!(
+            map_thinking_level_to_effort(&ThinkingLevel::Medium),
+            "medium"
+        );
         assert_eq!(map_thinking_level_to_effort(&ThinkingLevel::High), "high");
         assert_eq!(map_thinking_level_to_effort(&ThinkingLevel::Xhigh), "max");
     }
@@ -1870,8 +1964,14 @@ mod tests {
 
     #[test]
     fn test_resolve_cache_retention_explicit() {
-        assert_eq!(resolve_cache_retention(Some(&CacheRetention::None)), CacheRetention::None);
-        assert_eq!(resolve_cache_retention(Some(&CacheRetention::Long)), CacheRetention::Long);
+        assert_eq!(
+            resolve_cache_retention(Some(&CacheRetention::None)),
+            CacheRetention::None
+        );
+        assert_eq!(
+            resolve_cache_retention(Some(&CacheRetention::Long)),
+            CacheRetention::Long
+        );
     }
 
     #[test]

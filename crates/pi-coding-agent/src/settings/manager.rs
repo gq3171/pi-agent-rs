@@ -4,7 +4,8 @@ use serde_json::Value;
 
 use crate::config::paths;
 use crate::error::CodingAgentError;
-use crate::settings::types::Settings;
+use crate::resources::source_identity::{normalize_source_for_scope, source_match_key_for_scope};
+use crate::settings::types::{PackageSource, Settings};
 
 /// Manages loading, merging, and saving of settings.
 pub struct SettingsManager {
@@ -37,13 +38,22 @@ impl SettingsManager {
     pub fn load_and_merge(
         &mut self,
         project_settings: Option<&Settings>,
+        project_base_dir: Option<&Path>,
     ) -> Result<&Settings, CodingAgentError> {
         self.load()?;
+        let global_packages = self.settings.packages.clone();
         if let Some(project) = project_settings {
             let base = serde_json::to_value(&self.settings)?;
             let overlay = serde_json::to_value(project)?;
             let merged = deep_merge(base, overlay);
             self.settings = serde_json::from_value(merged)?;
+            let project_base = project_base_dir.unwrap_or(self.base_dir.as_path());
+            self.settings.packages = merge_package_sources(
+                global_packages,
+                project.packages.clone(),
+                &self.base_dir,
+                project_base,
+            );
         }
         Ok(&self.settings)
     }
@@ -125,6 +135,61 @@ impl SettingsManager {
     }
 }
 
+fn merge_package_sources(
+    global_packages: Option<Vec<PackageSource>>,
+    project_packages: Option<Vec<PackageSource>>,
+    global_base: &Path,
+    project_base: &Path,
+) -> Option<Vec<PackageSource>> {
+    match (global_packages, project_packages) {
+        (None, None) => None,
+        (Some(global), None) => Some(
+            global
+                .into_iter()
+                .map(|package| normalize_package_source(package, global_base))
+                .collect(),
+        ),
+        (None, Some(project)) => Some(
+            project
+                .into_iter()
+                .map(|package| normalize_package_source(package, project_base))
+                .collect(),
+        ),
+        (Some(global), Some(project)) => {
+            let mut merged = Vec::<PackageSource>::new();
+            let mut seen = std::collections::HashSet::<String>::new();
+
+            for package in project {
+                let package = normalize_package_source(package, project_base);
+                let key = source_match_key_for_scope(project_base, package.source());
+                if seen.insert(key) {
+                    merged.push(package);
+                }
+            }
+            for package in global {
+                let package = normalize_package_source(package, global_base);
+                let key = source_match_key_for_scope(global_base, package.source());
+                if seen.insert(key) {
+                    merged.push(package);
+                }
+            }
+            Some(merged)
+        }
+    }
+}
+
+fn normalize_package_source(package: PackageSource, scope_base: &Path) -> PackageSource {
+    match package {
+        PackageSource::Source(source) => {
+            PackageSource::Source(normalize_source_for_scope(scope_base, &source))
+        }
+        PackageSource::Filtered(mut filter) => {
+            filter.source = normalize_source_for_scope(scope_base, &filter.source);
+            PackageSource::Filtered(filter)
+        }
+    }
+}
+
 /// Deep merge two JSON values. `overlay` values take precedence.
 /// Objects are recursively merged; other types are replaced.
 pub fn deep_merge(base: Value, overlay: Value) -> Value {
@@ -147,6 +212,7 @@ pub fn deep_merge(base: Value, overlay: Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::types::{PackageSource, PackageSourceFilter};
     use serde_json::json;
 
     #[test]
@@ -203,5 +269,58 @@ mod tests {
         let mut mgr2 = SettingsManager::new(tmp.path());
         let settings = mgr2.load().unwrap();
         assert_eq!(settings.model, Some("test-model".to_string()));
+    }
+
+    #[test]
+    fn test_merge_package_sources_project_overrides_global() {
+        let global = Some(vec![
+            PackageSource::Source("npm:a".to_string()),
+            PackageSource::Source("npm:b".to_string()),
+        ]);
+        let project = Some(vec![
+            PackageSource::Filtered(PackageSourceFilter {
+                source: "npm:b".to_string(),
+                extensions: Some(vec![]),
+                skills: None,
+                prompts: None,
+                themes: None,
+            }),
+            PackageSource::Source("npm:c".to_string()),
+        ]);
+
+        let merged =
+            merge_package_sources(global, project, Path::new("/user"), Path::new("/project"))
+                .unwrap();
+        assert_eq!(merged.len(), 3);
+        assert_eq!(merged[0].source(), "npm:b");
+        assert_eq!(merged[1].source(), "npm:c");
+        assert_eq!(merged[2].source(), "npm:a");
+    }
+
+    #[test]
+    fn test_merge_package_sources_uses_identity_for_local_paths() {
+        let global = Some(vec![PackageSource::Source(
+            "../../work/proj/pkg".to_string(),
+        )]);
+        let project = Some(vec![PackageSource::Source("../pkg".to_string())]);
+
+        let merged = merge_package_sources(
+            global,
+            project,
+            Path::new("/home/user/.pi/agent"),
+            Path::new("/home/user/work/proj/.pi"),
+        )
+        .unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(
+            crate::resources::source_identity::source_match_key_for_scope(
+                Path::new("/home/user/work/proj/.pi"),
+                merged[0].source()
+            ),
+            crate::resources::source_identity::source_match_key_for_scope(
+                Path::new("/home/user/work/proj/.pi"),
+                "../pkg"
+            )
+        );
     }
 }

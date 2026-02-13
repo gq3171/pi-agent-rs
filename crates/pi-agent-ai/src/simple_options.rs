@@ -12,7 +12,7 @@ pub fn build_base_options(
             options
                 .base
                 .max_tokens
-                .filter(|&v| v > 0)  // TS uses || which treats 0 as falsy
+                .filter(|&v| v > 0) // TS uses || which treats 0 as falsy
                 .unwrap_or_else(|| model.max_tokens.min(32000)),
         ),
         api_key: if api_key.is_empty() {
@@ -55,10 +55,22 @@ pub fn adjust_max_tokens_for_thinking(
 
     let clamped = clamp_reasoning(level);
     let budget = match clamped {
-        ThinkingLevel::Minimal => effective_budgets.minimal.or(default_budgets.minimal).unwrap_or(1024),
-        ThinkingLevel::Low => effective_budgets.low.or(default_budgets.low).unwrap_or(2048),
-        ThinkingLevel::Medium => effective_budgets.medium.or(default_budgets.medium).unwrap_or(8192),
-        ThinkingLevel::High => effective_budgets.high.or(default_budgets.high).unwrap_or(16384),
+        ThinkingLevel::Minimal => effective_budgets
+            .minimal
+            .or(default_budgets.minimal)
+            .unwrap_or(1024),
+        ThinkingLevel::Low => effective_budgets
+            .low
+            .or(default_budgets.low)
+            .unwrap_or(2048),
+        ThinkingLevel::Medium => effective_budgets
+            .medium
+            .or(default_budgets.medium)
+            .unwrap_or(8192),
+        ThinkingLevel::High => effective_budgets
+            .high
+            .or(default_budgets.high)
+            .unwrap_or(16384),
         ThinkingLevel::Xhigh => unreachable!("xhigh should be clamped to high"),
     };
 

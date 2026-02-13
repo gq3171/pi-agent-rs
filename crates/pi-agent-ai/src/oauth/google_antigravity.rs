@@ -1,4 +1,4 @@
-use crate::oauth::pkce::{build_authorization_url, exchange_authorization_code, OAuthFlowStart};
+use crate::oauth::pkce::{OAuthFlowStart, build_authorization_url, exchange_authorization_code};
 use crate::oauth::types::{OAuthCredentials, OAuthProvider};
 
 /// Google Antigravity OAuth configuration.
@@ -59,5 +59,8 @@ pub async fn exchange_google_antigravity_code(
     )
     .await?;
 
-    Ok(OAuthCredentials::from_token_response(token, OAuthProvider::GoogleAntigravity))
+    Ok(OAuthCredentials::from_token_response(
+        token,
+        OAuthProvider::GoogleAntigravity,
+    ))
 }

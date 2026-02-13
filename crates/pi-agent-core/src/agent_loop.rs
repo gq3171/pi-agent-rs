@@ -70,9 +70,7 @@ pub fn agent_loop_continue(
 
     if let Some(last) = context.messages.last() {
         if last.role() == Some("assistant") {
-            return Err(format!(
-                "Cannot continue from message role: assistant"
-            ));
+            return Err(format!("Cannot continue from message role: assistant"));
         }
     }
 
@@ -126,11 +124,12 @@ async fn run_loop(
     let mut first_turn = true;
 
     // Check for steering messages at start
-    let mut pending_messages: Vec<AgentMessage> = if let Some(get_steering) = &config.get_steering_messages {
-        get_steering().await
-    } else {
-        vec![]
-    };
+    let mut pending_messages: Vec<AgentMessage> =
+        if let Some(get_steering) = &config.get_steering_messages {
+            get_steering().await
+        } else {
+            vec![]
+        };
 
     // Outer loop: continues when queued follow-up messages arrive
     loop {
@@ -164,10 +163,19 @@ async fn run_loop(
             }
 
             // Stream assistant response
-            let message = stream_assistant_response(current_context, config, cancel.clone(), stream, stream_fn).await;
+            let message = stream_assistant_response(
+                current_context,
+                config,
+                cancel.clone(),
+                stream,
+                stream_fn,
+            )
+            .await;
             new_messages.push(message.clone().into());
 
-            if message.stop_reason == StopReason::Error || message.stop_reason == StopReason::Aborted {
+            if message.stop_reason == StopReason::Error
+                || message.stop_reason == StopReason::Aborted
+            {
                 stream.push(AgentEvent::TurnEnd {
                     message: message.clone().into(),
                     tool_results: vec![],
@@ -269,7 +277,13 @@ async fn stream_assistant_response(
     let tools: Option<Vec<Tool>> = if context.tools.is_empty() {
         None
     } else {
-        Some(context.tools.iter().map(|t| t.definition().clone()).collect())
+        Some(
+            context
+                .tools
+                .iter()
+                .map(|t| t.definition().clone())
+                .collect(),
+        )
     };
 
     let llm_context = crate::types::Context {
@@ -353,7 +367,8 @@ async fn stream_assistant_response(
                     });
                 }
             }
-            AssistantMessageEvent::Done { message, .. } | AssistantMessageEvent::Error { error: message, .. } => {
+            AssistantMessageEvent::Done { message, .. }
+            | AssistantMessageEvent::Error { error: message, .. } => {
                 let final_message = message.clone();
                 if added_partial {
                     let len = context.messages.len();
@@ -375,12 +390,10 @@ async fn stream_assistant_response(
     }
 
     // Stream ended without Done/Error event — construct error response
-    let mut error_msg =
-        partial_message.unwrap_or_else(|| AssistantMessage::empty(&config.model));
+    let mut error_msg = partial_message.unwrap_or_else(|| AssistantMessage::empty(&config.model));
     error_msg.stop_reason = StopReason::Error;
     if error_msg.error_message.is_none() {
-        error_msg.error_message =
-            Some("LLM stream ended without a completion event".to_string());
+        error_msg.error_message = Some("LLM stream ended without a completion event".to_string());
     }
     if added_partial {
         let len = context.messages.len();
@@ -428,7 +441,12 @@ async fn execute_tool_calls(
     cancel: CancellationToken,
     stream: &EventStream<AgentEvent, Vec<AgentMessage>>,
     get_steering_messages: Option<
-        &Arc<dyn Fn() -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync>,
+        &Arc<
+            dyn Fn()
+                    -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<AgentMessage>> + Send>>
+                + Send
+                + Sync,
+        >,
     >,
 ) -> ToolExecutionResult {
     let tool_calls: Vec<&ToolCall> = assistant_message

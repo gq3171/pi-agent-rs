@@ -13,9 +13,7 @@ pub fn validate_tool_arguments(tool: &Tool, tool_call: &ToolCall) -> Result<Valu
     }
 
     // Use jsonschema crate for validation
-    match jsonschema::options()
-        .build(schema)
-    {
+    match jsonschema::options().build(schema) {
         Ok(validator) => {
             if validator.is_valid(&tool_call.arguments) {
                 Ok(tool_call.arguments.clone())
@@ -44,7 +42,11 @@ pub fn validate_tool_arguments(tool: &Tool, tool_call: &ToolCall) -> Result<Valu
         }
         Err(e) => {
             // Schema compilation failed - fail closed to prevent unvalidated input
-            tracing::error!("Failed to compile JSON schema for tool {}: {}", tool.name, e);
+            tracing::error!(
+                "Failed to compile JSON schema for tool {}: {}",
+                tool.name,
+                e
+            );
             Err(format!(
                 "Internal error: schema compilation failed for tool \"{}\": {}",
                 tool.name, e

@@ -56,9 +56,7 @@ pub fn load_skills_from_dir(dir: &Path) -> Result<Vec<Skill>, Box<dyn std::error
 }
 
 /// Load a single skill from a markdown file.
-fn load_skill_from_file(
-    path: &Path,
-) -> Result<Option<Skill>, Box<dyn std::error::Error>> {
+fn load_skill_from_file(path: &Path) -> Result<Option<Skill>, Box<dyn std::error::Error>> {
     let name = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -66,8 +64,8 @@ fn load_skill_from_file(
         .to_string();
 
     let content = std::fs::read_to_string(path)?;
-    let (meta, body) = frontmatter::parse_frontmatter::<SkillFrontmatter>(&content)
-        .unwrap_or((None, &content));
+    let (meta, body) =
+        frontmatter::parse_frontmatter::<SkillFrontmatter>(&content).unwrap_or((None, &content));
 
     let meta = meta.unwrap_or_default();
 

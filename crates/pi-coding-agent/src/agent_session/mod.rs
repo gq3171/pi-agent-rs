@@ -1,3 +1,3 @@
-pub mod session;
 pub mod events;
 pub mod sdk;
+pub mod session;

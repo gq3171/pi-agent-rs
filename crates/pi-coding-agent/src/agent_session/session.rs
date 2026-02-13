@@ -9,17 +9,19 @@ use tokio_util::sync::CancellationToken;
 use pi_agent_core::agent_types::{
     AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, StreamFnBox,
 };
-use pi_agent_core::types::{Message, Model, StopReason};
+use pi_agent_core::types::{Message, Model, StopReason, ThinkingLevel};
 
 use crate::agent_session::events::AgentSessionEvent;
 use crate::auth::storage::AuthStorage;
 use crate::compaction::compaction;
 use crate::error::CodingAgentError;
+use crate::extensions::runner::ExtensionRunner;
+use crate::extensions::types::ContextEvent;
 use crate::messages::convert::convert_to_llm;
 use crate::model::registry::ModelRegistry;
 use crate::retry::{self, RetryConfig};
 use crate::session::manager::SessionManager;
-use crate::session::types::SessionEntry;
+use crate::session::types::{SessionEntry, now_iso_timestamp};
 use crate::settings::manager::SettingsManager;
 
 /// Options for prompting the agent.
@@ -29,6 +31,42 @@ pub struct PromptOptions {
     pub model: Option<Model>,
     /// Custom system prompt additions.
     pub system_prompt: Option<String>,
+}
+
+/// Parsed `<skill ...>` block from user input.
+#[derive(Debug, Clone)]
+pub struct ParsedSkillBlock {
+    pub name: String,
+    pub location: String,
+    pub content: String,
+    pub user_message: Option<String>,
+}
+
+/// Parse a skill block from text.
+///
+/// Expected format:
+/// <skill name=\"...\" location=\"...\">\n...\n</skill>\n\n(optional user message)
+pub fn parse_skill_block(text: &str) -> Option<ParsedSkillBlock> {
+    let re = regex::Regex::new(
+        r#"(?s)^<skill name="([^"]+)" location="([^"]+)">\n(.*?)\n</skill>(?:\n\n(.*))?$"#,
+    )
+    .ok()?;
+    let caps = re.captures(text)?;
+
+    let name = caps.get(1)?.as_str().to_string();
+    let location = caps.get(2)?.as_str().to_string();
+    let content = caps.get(3)?.as_str().to_string();
+    let user_message = caps
+        .get(4)
+        .map(|m| m.as_str().trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    Some(ParsedSkillBlock {
+        name,
+        location,
+        content,
+        user_message,
+    })
 }
 
 /// Result of a compaction operation.
@@ -57,6 +95,16 @@ pub struct SessionStats {
     pub turn_count: usize,
 }
 
+/// Estimated context usage for the active model.
+#[derive(Debug, Clone, Default)]
+pub struct ContextUsage {
+    /// Estimated context tokens, or `None` if unknown.
+    pub tokens: Option<u64>,
+    pub context_window: u64,
+    /// Usage percentage, or `None` when `tokens` is unknown.
+    pub percent: Option<f64>,
+}
+
 /// Type alias for event listener callbacks.
 pub type EventListener = Box<dyn Fn(AgentSessionEvent) + Send + Sync>;
 
@@ -64,16 +112,17 @@ pub type EventListener = Box<dyn Fn(AgentSessionEvent) + Send + Sync>;
 /// Takes conversation context (messages to summarize) and an optional previous
 /// summary for incremental summarization. Returns a summary string.
 pub type SummaryFn = Arc<
-    dyn Fn(Vec<AgentMessage>, Option<String>) -> Pin<Box<dyn Future<Output = Result<String, CodingAgentError>> + Send>>
+    dyn Fn(
+            Vec<AgentMessage>,
+            Option<String>,
+        ) -> Pin<Box<dyn Future<Output = Result<String, CodingAgentError>> + Send>>
         + Send
         + Sync,
 >;
 
 /// Type alias for the convert-to-LLM function used by AgentLoopConfig.
 type ConvertToLlmFn = Arc<
-    dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync,
 >;
 
 /// Core session orchestrator that ties together the agent, session persistence,
@@ -113,6 +162,10 @@ pub struct AgentSession {
     listeners: Vec<EventListener>,
     /// Turn counter.
     turn_count: usize,
+    /// Extension runner (if configured).
+    extension_runner: Option<Arc<ExtensionRunner>>,
+    /// Default reasoning/thinking level.
+    thinking_level: Option<ThinkingLevel>,
 }
 
 impl AgentSession {
@@ -142,6 +195,8 @@ impl AgentSession {
             cancel: CancellationToken::new(),
             listeners: Vec::new(),
             turn_count: 0,
+            extension_runner: None,
+            thinking_level: None,
         }
     }
 
@@ -168,6 +223,29 @@ impl AgentSession {
     /// Set the retry configuration for transient errors.
     pub fn set_retry_config(&mut self, config: RetryConfig) {
         self.retry_config = config;
+    }
+
+    /// Set extension runner for hook dispatch and tool interception.
+    pub fn set_extension_runner(&mut self, runner: Arc<ExtensionRunner>) {
+        self.extension_runner = Some(runner);
+    }
+
+    /// Set default thinking level from string.
+    pub fn set_thinking_level_str(&mut self, level: &str) {
+        self.thinking_level = match level {
+            "off" => None,
+            "minimal" => Some(ThinkingLevel::Minimal),
+            "low" => Some(ThinkingLevel::Low),
+            "medium" => Some(ThinkingLevel::Medium),
+            "high" => Some(ThinkingLevel::High),
+            "xhigh" => Some(ThinkingLevel::Xhigh),
+            _ => self.thinking_level.clone(),
+        };
+    }
+
+    /// Set default thinking level.
+    pub fn set_thinking_level(&mut self, level: Option<ThinkingLevel>) {
+        self.thinking_level = level;
     }
 
     /// Send a prompt to the agent.
@@ -211,20 +289,24 @@ impl AgentSession {
         };
 
         // Validate model before any side effects (persist, turn count, etc.)
-        let model = self.model.clone().ok_or_else(|| {
-            CodingAgentError::Model("No model set for agent session".to_string())
-        })?;
+        let model = self
+            .model
+            .clone()
+            .ok_or_else(|| CodingAgentError::Model("No model set for agent session".to_string()))?;
 
         // Build user message (do NOT push to self.messages yet — agent_loop will add it)
         let user_msg = AgentMessage::user(text);
 
         // Persist user entry (after validation passes)
         if let Some(session_id) = &self.session_id {
-            let entry = SessionEntry::User {
+            let entry = SessionEntry::Message {
                 id: SessionEntry::new_id(),
                 parent_id: None,
-                timestamp: chrono::Utc::now().timestamp_millis(),
-                content: text.to_string(),
+                timestamp: now_iso_timestamp(),
+                message: Message::User(pi_agent_core::types::UserMessage {
+                    content: pi_agent_core::types::UserContent::Text(text.to_string()),
+                    timestamp: chrono::Utc::now().timestamp_millis(),
+                }),
             };
             if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
                 tracing::warn!("Failed to persist user entry: {e}");
@@ -232,6 +314,11 @@ impl AgentSession {
         }
 
         self.turn_count += 1;
+        if let Some(runner) = &self.extension_runner {
+            if let Err(e) = runner.emit_event(ContextEvent::TurnStart).await {
+                tracing::warn!("Extension turn_start event failed: {e}");
+            }
+        }
 
         let convert_fn: ConvertToLlmFn = Arc::new(|msgs: &[AgentMessage]| {
             let msgs = msgs.to_vec();
@@ -256,7 +343,11 @@ impl AgentSession {
         loop {
             let config = AgentLoopConfig {
                 model: model.clone(),
-                reasoning: None,
+                reasoning: if model.reasoning {
+                    self.thinking_level.clone()
+                } else {
+                    None
+                },
                 thinking_budgets: None,
                 temperature: None,
                 max_tokens: None,
@@ -303,11 +394,14 @@ impl AgentSession {
                                 serde_json::json!({"error": format!("Serialization failed: {e}")})
                             }
                         };
-                        let entry = SessionEntry::Assistant {
+                        let entry = SessionEntry::Message {
                             id: SessionEntry::new_id(),
                             parent_id: None,
-                            timestamp: chrono::Utc::now().timestamp_millis(),
-                            message: message_value,
+                            timestamp: now_iso_timestamp(),
+                            message: match serde_json::from_value::<Message>(message_value) {
+                                Ok(message) => message,
+                                Err(_) => Message::Assistant(assistant_msg.clone()),
+                            },
                         };
                         if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
                             tracing::warn!("Failed to persist assistant entry: {e}");
@@ -330,8 +424,8 @@ impl AgentSession {
                         self.retry_attempt += 1;
                         let delay_ms =
                             retry::calculate_delay(&self.retry_config, self.retry_attempt);
-                        let error_msg = Self::extract_last_error_message(&new_messages)
-                            .unwrap_or_default();
+                        let error_msg =
+                            Self::extract_last_error_message(&new_messages).unwrap_or_default();
 
                         self.emit(AgentSessionEvent::RetryStart {
                             attempt: self.retry_attempt,
@@ -368,6 +462,11 @@ impl AgentSession {
                             session_id: session_id.clone(),
                             messages: self.messages.clone(),
                         });
+                    }
+                    if let Some(runner) = &self.extension_runner {
+                        if let Err(e) = runner.emit_event(ContextEvent::TurnEnd).await {
+                            tracing::warn!("Extension turn_end event failed: {e}");
+                        }
                     }
                 }
                 None => {
@@ -451,12 +550,24 @@ impl AgentSession {
     fn find_last_compaction_summary(&self) -> Option<String> {
         let session_id = self.session_id.as_ref()?;
         let (_header, entries) = self.session_manager.open(session_id).ok()?;
-        entries.iter().rev().find_map(|entry| {
-            if let SessionEntry::Summary { summary, .. } = entry {
-                Some(summary.clone())
-            } else {
-                None
+        entries.iter().rev().find_map(|entry| match entry {
+            SessionEntry::Compaction { summary, .. }
+            | SessionEntry::LegacySummary { summary, .. } => Some(summary.clone()),
+            _ => None,
+        })
+    }
+
+    fn find_latest_compaction_timestamp_ms(&self) -> Option<i64> {
+        let session_id = self.session_id.as_ref()?;
+        let (_header, entries) = self.session_manager.open(session_id).ok()?;
+        entries.iter().rev().find_map(|entry| match entry {
+            SessionEntry::Compaction { timestamp, .. } => {
+                chrono::DateTime::parse_from_rfc3339(timestamp)
+                    .ok()
+                    .map(|value| value.timestamp_millis())
             }
+            SessionEntry::LegacySummary { timestamp, .. } => Some(*timestamp),
+            _ => None,
         })
     }
 
@@ -529,12 +640,15 @@ impl AgentSession {
 
         // Persist compaction summary
         if let Some(session_id) = &self.session_id {
-            let entry = SessionEntry::Summary {
+            let entry = SessionEntry::Compaction {
                 id: SessionEntry::new_id(),
                 parent_id: None,
-                timestamp: chrono::Utc::now().timestamp_millis(),
+                timestamp: now_iso_timestamp(),
                 summary,
-                summarized_ids: Vec::new(),
+                first_kept_entry_id: None,
+                tokens_before,
+                details: None,
+                from_hook: None,
             };
             if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
                 tracing::warn!("Failed to persist compaction summary: {e}");
@@ -563,9 +677,10 @@ impl AgentSession {
 
     /// Fork the session from a specific entry.
     pub async fn fork(&mut self, entry_id: &str) -> Result<ForkResult, CodingAgentError> {
-        let source_id = self.session_id.as_ref().ok_or_else(|| {
-            CodingAgentError::Session("No active session to fork".to_string())
-        })?;
+        let source_id = self
+            .session_id
+            .as_ref()
+            .ok_or_else(|| CodingAgentError::Session("No active session to fork".to_string()))?;
 
         let new_session_id = uuid::Uuid::new_v4().to_string();
         let (header, entries) =
@@ -581,7 +696,7 @@ impl AgentSession {
         });
 
         // Switch to the new session
-        self.session_id = Some(header.session_id);
+        self.session_id = Some(header.id);
         // Rebuild context from forked entries
         self.messages = crate::session::context::build_session_context(&entries);
 
@@ -601,9 +716,70 @@ impl AgentSession {
         }
     }
 
+    /// Estimate current context usage for the active model.
+    ///
+    /// After compaction, usage is unknown until we receive a successful assistant
+    /// response with usage metrics produced after the latest compaction boundary.
+    pub fn get_context_usage(&self) -> Option<ContextUsage> {
+        let model = self.model.as_ref()?;
+        let context_window = model.context_window;
+        if context_window == 0 {
+            return None;
+        }
+
+        if let Some(compaction_ts) = self.find_latest_compaction_timestamp_ms() {
+            let mut has_post_compaction_usage = false;
+
+            for message in self.messages.iter().rev() {
+                let AgentMessage::Llm(Message::Assistant(assistant)) = message else {
+                    continue;
+                };
+                if assistant.timestamp <= compaction_ts {
+                    break;
+                }
+                if assistant.stop_reason == StopReason::Aborted
+                    || assistant.stop_reason == StopReason::Error
+                {
+                    continue;
+                }
+                let context_tokens = assistant.usage.input
+                    + assistant.usage.output
+                    + assistant.usage.cache_read
+                    + assistant.usage.cache_write;
+                if context_tokens > 0 {
+                    has_post_compaction_usage = true;
+                }
+                break;
+            }
+
+            if !has_post_compaction_usage {
+                return Some(ContextUsage {
+                    tokens: None,
+                    context_window,
+                    percent: None,
+                });
+            }
+        }
+
+        let tokens = compaction::estimate_messages_tokens(&self.messages);
+        let percent = (tokens as f64 / context_window as f64) * 100.0;
+        Some(ContextUsage {
+            tokens: Some(tokens),
+            context_window,
+            percent: Some(percent),
+        })
+    }
+
     /// Get the current session ID.
     pub fn session_id(&self) -> Option<&str> {
         self.session_id.as_deref()
+    }
+
+    /// Reset current in-memory conversation and force next prompt to start a new session.
+    pub fn reset_session(&mut self) {
+        self.session_id = None;
+        self.messages.clear();
+        self.turn_count = 0;
     }
 
     /// Get the working directory.
@@ -616,6 +792,11 @@ impl AgentSession {
         &self.messages
     }
 
+    /// Get current tools.
+    pub fn tools(&self) -> &[Arc<dyn AgentTool>] {
+        &self.tools
+    }
+
     /// Get mutable messages.
     pub fn messages_mut(&mut self) -> &mut Vec<AgentMessage> {
         &mut self.messages
@@ -624,6 +805,11 @@ impl AgentSession {
     /// Get the auth storage.
     pub fn auth_storage(&self) -> &AuthStorage {
         &self.auth_storage
+    }
+
+    /// Get the session manager.
+    pub fn session_manager(&self) -> &SessionManager {
+        &self.session_manager
     }
 
     /// Get the model registry.
@@ -651,5 +837,105 @@ impl AgentSession {
         for listener in &self.listeners {
             listener(event.clone());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pi_agent_core::types::{AssistantMessage, Message, Usage, UsageCost};
+
+    fn create_test_session() -> (tempfile::TempDir, AgentSession) {
+        let tmp = tempfile::tempdir().unwrap();
+        let base_dir = tmp.path().join("agent");
+        std::fs::create_dir_all(&base_dir).unwrap();
+
+        let session_manager = SessionManager::new(&base_dir);
+        session_manager.create("test-session", None).unwrap();
+
+        let auth_storage = Arc::new(AuthStorage::new(&base_dir));
+        let model_registry = Arc::new(ModelRegistry::new());
+        let settings_manager = Arc::new(SettingsManager::new(&base_dir));
+
+        let mut session = AgentSession::new(
+            tmp.path().to_path_buf(),
+            session_manager,
+            auth_storage,
+            model_registry.clone(),
+            settings_manager,
+        );
+        session.session_id = Some("test-session".to_string());
+        session.set_model(model_registry.all_models()[0].clone());
+
+        (tmp, session)
+    }
+
+    #[test]
+    fn test_get_context_usage_unknown_after_compaction_without_post_usage() {
+        let (_tmp, session) = create_test_session();
+        let compaction_entry = SessionEntry::Compaction {
+            id: SessionEntry::new_id(),
+            parent_id: None,
+            timestamp: "2026-02-12T00:00:00Z".to_string(),
+            summary: "summary".to_string(),
+            first_kept_entry_id: None,
+            tokens_before: 1000,
+            details: None,
+            from_hook: None,
+        };
+        session
+            .session_manager
+            .append_entry("test-session", &compaction_entry)
+            .unwrap();
+
+        let usage = session.get_context_usage().unwrap();
+        assert_eq!(usage.tokens, None);
+        assert_eq!(usage.percent, None);
+        assert!(usage.context_window > 0);
+    }
+
+    #[test]
+    fn test_get_context_usage_known_with_post_compaction_usage() {
+        let (_tmp, mut session) = create_test_session();
+        let compaction_entry = SessionEntry::Compaction {
+            id: SessionEntry::new_id(),
+            parent_id: None,
+            timestamp: "2026-02-12T00:00:00Z".to_string(),
+            summary: "summary".to_string(),
+            first_kept_entry_id: None,
+            tokens_before: 1000,
+            details: None,
+            from_hook: None,
+        };
+        session
+            .session_manager
+            .append_entry("test-session", &compaction_entry)
+            .unwrap();
+
+        session
+            .messages
+            .push(AgentMessage::Llm(Message::Assistant(AssistantMessage {
+                content: Vec::new(),
+                api: "openai-responses".to_string(),
+                provider: "openai".to_string(),
+                model: "gpt-5".to_string(),
+                usage: Usage {
+                    input: 120,
+                    output: 80,
+                    cache_read: 0,
+                    cache_write: 0,
+                    total_tokens: 200,
+                    cost: UsageCost::default(),
+                },
+                stop_reason: StopReason::Stop,
+                error_message: None,
+                timestamp: chrono::DateTime::parse_from_rfc3339("2026-02-12T00:00:01Z")
+                    .unwrap()
+                    .timestamp_millis(),
+            })));
+
+        let usage = session.get_context_usage().unwrap();
+        assert!(usage.tokens.is_some());
+        assert!(usage.percent.is_some());
     }
 }

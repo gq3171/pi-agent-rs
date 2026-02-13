@@ -6,31 +6,44 @@ use crate::session::types::SessionEntry;
 
 /// Build agent context messages from session entries.
 ///
-/// Converts a list of `SessionEntry` into `Vec<AgentMessage>` suitable for
-/// feeding into the agent loop.
+/// Supports both modern pi-mono v3 entries (`message`, `compaction`, ...)
+/// and legacy Rust entries (`user`, `assistant`, `toolResult`, ...).
 pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
     let mut messages = Vec::new();
 
     for entry in entries {
         match entry {
-            SessionEntry::User { content, timestamp, .. } => {
+            SessionEntry::Message { message, .. } => {
+                messages.push(AgentMessage::Llm(message.clone()));
+            }
+
+            SessionEntry::LegacyUser {
+                content, timestamp, ..
+            } => {
                 messages.push(AgentMessage::Llm(Message::User(UserMessage {
                     content: UserContent::Text(content.clone()),
                     timestamp: *timestamp,
                 })));
             }
 
-            SessionEntry::Assistant { message, timestamp, .. } => {
-                // Try to parse the stored message as an AssistantMessage
+            SessionEntry::LegacyAssistant {
+                message, timestamp, ..
+            } => {
+                // 1) Try parsing as full Message
+                if let Ok(msg) = serde_json::from_value::<Message>(message.clone()) {
+                    messages.push(AgentMessage::Llm(msg));
+                    continue;
+                }
+
+                // 2) Fallback: parse as assistant payload object
                 if let Some(assistant_msg) = parse_assistant_message(message, *timestamp) {
                     messages.push(AgentMessage::Llm(Message::Assistant(assistant_msg)));
                 } else {
-                    // Store as custom if it can't be parsed
                     messages.push(AgentMessage::Custom(message.clone()));
                 }
             }
 
-            SessionEntry::ToolResult {
+            SessionEntry::LegacyToolResult {
                 tool_call_id,
                 tool_name,
                 content,
@@ -49,8 +62,55 @@ pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
                 })));
             }
 
-            SessionEntry::Summary { summary, timestamp, .. } => {
-                // Summaries become custom messages (they're metadata)
+            SessionEntry::Compaction {
+                summary,
+                tokens_before,
+                timestamp,
+                ..
+            } => {
+                messages.push(AgentMessage::Custom(serde_json::json!({
+                    "type": "compactionSummary",
+                    "summary": summary,
+                    "tokensBefore": tokens_before,
+                    "timestamp": timestamp,
+                })));
+            }
+
+            SessionEntry::BranchSummary {
+                from_id,
+                summary,
+                timestamp,
+                ..
+            } => {
+                messages.push(AgentMessage::Custom(serde_json::json!({
+                    "type": "branchSummary",
+                    "fromId": from_id,
+                    "summary": summary,
+                    "timestamp": timestamp,
+                })));
+            }
+
+            SessionEntry::CustomMessage {
+                custom_type,
+                content,
+                display,
+                details,
+                timestamp,
+                ..
+            } => {
+                messages.push(AgentMessage::Custom(serde_json::json!({
+                    "type": "custom",
+                    "customType": custom_type,
+                    "content": content,
+                    "display": display,
+                    "details": details,
+                    "timestamp": timestamp,
+                })));
+            }
+
+            SessionEntry::LegacySummary {
+                summary, timestamp, ..
+            } => {
                 messages.push(AgentMessage::Custom(serde_json::json!({
                     "type": "summary",
                     "summary": summary,
@@ -58,10 +118,7 @@ pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
                 })));
             }
 
-            // ToolUse entries are typically part of assistant messages
-            // and handled through the assistant message content blocks.
-            // We still keep them as custom for context.
-            SessionEntry::ToolUse {
+            SessionEntry::LegacyToolUse {
                 tool_call_id,
                 tool_name,
                 arguments,
@@ -77,8 +134,12 @@ pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
                 })));
             }
 
-            // Non-message entries (ModelSwitch, Fork, System, Custom) are kept as custom.
-            SessionEntry::ModelSwitch { from_model, to_model, timestamp, .. } => {
+            SessionEntry::LegacyModelSwitch {
+                from_model,
+                to_model,
+                timestamp,
+                ..
+            } => {
                 messages.push(AgentMessage::Custom(serde_json::json!({
                     "type": "modelSwitch",
                     "fromModel": from_model,
@@ -87,9 +148,14 @@ pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
                 })));
             }
 
-            SessionEntry::Fork { .. } | SessionEntry::Custom { .. } | SessionEntry::System { .. } => {
-                // These are metadata entries, skip or keep as custom
-            }
+            // Metadata entries not currently injected into LLM context.
+            SessionEntry::ThinkingLevelChange { .. }
+            | SessionEntry::ModelChange { .. }
+            | SessionEntry::Custom { .. }
+            | SessionEntry::Label { .. }
+            | SessionEntry::SessionInfo { .. }
+            | SessionEntry::LegacyFork { .. }
+            | SessionEntry::LegacySystem { .. } => {}
         }
     }
 
@@ -98,22 +164,42 @@ pub fn build_session_context(entries: &[SessionEntry]) -> Vec<AgentMessage> {
 
 /// Try to parse a JSON value as an AssistantMessage.
 fn parse_assistant_message(value: &Value, default_timestamp: i64) -> Option<AssistantMessage> {
-    // If it has "content" as an array, try to parse it as AssistantMessage
     let obj = value.as_object()?;
 
     let content_val = obj.get("content")?;
     let content: Vec<ContentBlock> = serde_json::from_value(content_val.clone()).ok()?;
 
-    let api = obj.get("api").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let provider = obj.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let usage: Usage = obj.get("usage").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_default();
+    let api = obj
+        .get("api")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let provider = obj
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let model = obj
+        .get("model")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let usage: Usage = obj
+        .get("usage")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
     let stop_reason: StopReason = obj
         .get("stopReason")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or(StopReason::Stop);
-    let error_message = obj.get("errorMessage").and_then(|v| v.as_str()).map(String::from);
-    let timestamp = obj.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(default_timestamp);
+    let error_message = obj
+        .get("errorMessage")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let timestamp = obj
+        .get("timestamp")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(default_timestamp);
 
     Some(AssistantMessage {
         content,
@@ -147,26 +233,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_context_from_entries() {
+    fn test_build_context_from_modern_message_entries() {
         let entries = vec![
-            SessionEntry::User {
+            SessionEntry::Message {
                 id: "e1".to_string(),
                 parent_id: None,
-                timestamp: 1000,
-                content: "Hello".to_string(),
+                timestamp: crate::session::types::now_iso_timestamp(),
+                message: Message::User(UserMessage {
+                    content: UserContent::Text("Hello".to_string()),
+                    timestamp: 1000,
+                }),
             },
-            SessionEntry::Assistant {
+            SessionEntry::Message {
                 id: "e2".to_string(),
                 parent_id: Some("e1".to_string()),
-                timestamp: 1001,
-                message: serde_json::json!({
-                    "content": [{"type": "text", "text": "Hi there!"}],
-                    "api": "anthropic-messages",
-                    "provider": "anthropic",
-                    "model": "claude-sonnet-4",
-                    "usage": {"input": 10, "output": 5, "cacheRead": 0, "cacheWrite": 0, "totalTokens": 15, "cost": {"input": 0.0, "output": 0.0, "cacheRead": 0.0, "cacheWrite": 0.0, "total": 0.0}},
-                    "stopReason": "stop",
-                    "timestamp": 1001
+                timestamp: crate::session::types::now_iso_timestamp(),
+                message: Message::Assistant(AssistantMessage {
+                    content: vec![ContentBlock::Text(TextContent {
+                        text: "Hi there!".to_string(),
+                        text_signature: None,
+                    })],
+                    api: "anthropic-messages".to_string(),
+                    provider: "anthropic".to_string(),
+                    model: "claude-sonnet-4".to_string(),
+                    usage: Usage::default(),
+                    stop_reason: StopReason::Stop,
+                    error_message: None,
+                    timestamp: 1001,
                 }),
             },
         ];
@@ -178,8 +271,8 @@ mod tests {
     }
 
     #[test]
-    fn test_build_context_with_tool_result() {
-        let entries = vec![SessionEntry::ToolResult {
+    fn test_build_context_with_legacy_tool_result() {
+        let entries = vec![SessionEntry::LegacyToolResult {
             id: "tr1".to_string(),
             parent_id: None,
             timestamp: 2000,

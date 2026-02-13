@@ -4,6 +4,7 @@ use once_cell::sync::Lazy;
 
 pub const APP_NAME: &str = "pi-agent";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const CONFIG_DIR_NAME: &str = ".pi";
 
 pub const SESSIONS_DIR_NAME: &str = "sessions";
 pub const MODELS_FILE_NAME: &str = "models.json";
@@ -15,7 +16,7 @@ pub const SKILLS_DIR_NAME: &str = "skills";
 pub static DEFAULT_BASE_DIR: Lazy<PathBuf> = Lazy::new(|| {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".pi")
+        .join(CONFIG_DIR_NAME)
         .join("agent")
 });
 

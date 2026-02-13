@@ -2,6 +2,89 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackageSourceFilter {
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompts: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub themes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PackageSource {
+    Source(String),
+    Filtered(PackageSourceFilter),
+}
+
+impl PackageSource {
+    pub fn source(&self) -> &str {
+        match self {
+            PackageSource::Source(source) => source,
+            PackageSource::Filtered(filter) => &filter.source,
+        }
+    }
+
+    pub fn extensions_enabled(&self) -> bool {
+        match self {
+            PackageSource::Source(_) => true,
+            PackageSource::Filtered(filter) => filter
+                .extensions
+                .as_ref()
+                .is_none_or(|values| !values.is_empty()),
+        }
+    }
+
+    pub fn skills_enabled(&self) -> bool {
+        match self {
+            PackageSource::Source(_) => true,
+            PackageSource::Filtered(filter) => filter
+                .skills
+                .as_ref()
+                .is_none_or(|values| !values.is_empty()),
+        }
+    }
+
+    pub fn prompts_enabled(&self) -> bool {
+        match self {
+            PackageSource::Source(_) => true,
+            PackageSource::Filtered(filter) => filter
+                .prompts
+                .as_ref()
+                .is_none_or(|values| !values.is_empty()),
+        }
+    }
+
+    pub fn themes_enabled(&self) -> bool {
+        match self {
+            PackageSource::Source(_) => true,
+            PackageSource::Filtered(filter) => filter
+                .themes
+                .as_ref()
+                .is_none_or(|values| !values.is_empty()),
+        }
+    }
+
+    pub fn resource_patterns(&self, resource_kind: &str) -> Option<&[String]> {
+        match self {
+            PackageSource::Source(_) => None,
+            PackageSource::Filtered(filter) => match resource_kind {
+                "extensions" => filter.extensions.as_deref(),
+                "skills" => filter.skills.as_deref(),
+                "prompts" => filter.prompts.as_deref(),
+                "themes" => filter.themes.as_deref(),
+                _ => None,
+            },
+        }
+    }
+}
+
 /// Top-level settings structure, compatible with TS settings.json.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -57,6 +140,18 @@ pub struct Settings {
     /// Extension configurations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extensions: Option<HashMap<String, Value>>,
+
+    /// Installed package sources and optional resource filters.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub packages: Option<Vec<PackageSource>>,
+
+    /// Optional model scope for cycling and startup selection.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled_models: Option<Vec<String>>,
+
+    /// Quiet startup flag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_startup: Option<bool>,
 
     /// Any additional fields not covered above.
     #[serde(flatten)]

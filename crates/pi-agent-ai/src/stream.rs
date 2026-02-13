@@ -4,7 +4,10 @@ use tokio_util::sync::CancellationToken;
 
 use crate::registry::ApiRegistry;
 
-fn resolve_provider<'a>(registry: &'a ApiRegistry, api: &str) -> Result<&'a std::sync::Arc<dyn crate::registry::ApiProvider>, String> {
+fn resolve_provider<'a>(
+    registry: &'a ApiRegistry,
+    api: &str,
+) -> Result<&'a std::sync::Arc<dyn crate::registry::ApiProvider>, String> {
     registry
         .get(api)
         .ok_or_else(|| format!("No API provider registered for api: {api}"))

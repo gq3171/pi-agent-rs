@@ -1,4 +1,4 @@
-use crate::oauth::pkce::{build_authorization_url, exchange_authorization_code, OAuthFlowStart};
+use crate::oauth::pkce::{OAuthFlowStart, build_authorization_url, exchange_authorization_code};
 use crate::oauth::types::{OAuthCredentials, OAuthProvider};
 
 /// OpenAI Codex OAuth configuration.
@@ -76,5 +76,8 @@ pub async fn exchange_openai_codex_code(
     )
     .await?;
 
-    Ok(OAuthCredentials::from_token_response(token, OAuthProvider::OpenaiCodex))
+    Ok(OAuthCredentials::from_token_response(
+        token,
+        OAuthProvider::OpenaiCodex,
+    ))
 }

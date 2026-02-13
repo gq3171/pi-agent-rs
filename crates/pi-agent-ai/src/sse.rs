@@ -133,7 +133,9 @@ mod tests {
     #[test]
     fn test_single_event() {
         let mut parser = SseParser::new();
-        let events = parser.feed("event: message_start\ndata: {\"type\": \"message_start\"}\n\n").unwrap();
+        let events = parser
+            .feed("event: message_start\ndata: {\"type\": \"message_start\"}\n\n")
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "message_start");
         assert_eq!(events[0].data, "{\"type\": \"message_start\"}");
@@ -142,9 +144,9 @@ mod tests {
     #[test]
     fn test_multiple_events() {
         let mut parser = SseParser::new();
-        let events = parser.feed(
-            "event: a\ndata: 1\n\nevent: b\ndata: 2\n\n",
-        ).unwrap();
+        let events = parser
+            .feed("event: a\ndata: 1\n\nevent: b\ndata: 2\n\n")
+            .unwrap();
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].event_type, "a");
         assert_eq!(events[0].data, "1");
@@ -188,7 +190,9 @@ mod tests {
     #[test]
     fn test_comments_ignored() {
         let mut parser = SseParser::new();
-        let events = parser.feed(": this is a comment\nevent: test\ndata: value\n\n").unwrap();
+        let events = parser
+            .feed(": this is a comment\nevent: test\ndata: value\n\n")
+            .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].event_type, "test");
     }

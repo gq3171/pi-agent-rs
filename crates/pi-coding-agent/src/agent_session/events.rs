@@ -8,10 +8,7 @@ pub enum AgentSessionEvent {
     Agent(AgentEvent),
 
     /// Session was created or resumed.
-    SessionStart {
-        session_id: String,
-        is_new: bool,
-    },
+    SessionStart { session_id: String, is_new: bool },
 
     /// Session completed (all turns done).
     SessionEnd {
@@ -20,10 +17,7 @@ pub enum AgentSessionEvent {
     },
 
     /// Model was switched.
-    ModelSwitched {
-        from: Option<Model>,
-        to: Model,
-    },
+    ModelSwitched { from: Option<Model>, to: Model },
 
     /// Compaction occurred.
     Compacted {
@@ -49,15 +43,10 @@ pub enum AgentSessionEvent {
     },
 
     /// A retry attempt has completed.
-    RetryEnd {
-        attempt: u32,
-        success: bool,
-    },
+    RetryEnd { attempt: u32, success: bool },
 
     /// Error occurred at session level.
-    Error {
-        message: String,
-    },
+    Error { message: String },
 }
 
 impl AgentSessionEvent {

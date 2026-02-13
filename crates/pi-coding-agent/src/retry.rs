@@ -51,10 +51,7 @@ static CONTEXT_OVERFLOW_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         r"(?i)input token count",
         r"(?i)exceeds.*context",
     ];
-    patterns
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
+    patterns.iter().filter_map(|p| Regex::new(p).ok()).collect()
 });
 
 // ============================================================================
@@ -84,10 +81,7 @@ static RETRYABLE_ERROR_PATTERNS: Lazy<Vec<Regex>> = Lazy::new(|| {
         r"(?i)request.?timeout",
         r"(?i)capacity",
     ];
-    patterns
-        .iter()
-        .filter_map(|p| Regex::new(p).ok())
-        .collect()
+    patterns.iter().filter_map(|p| Regex::new(p).ok()).collect()
 });
 
 /// Check if an error message indicates a context overflow.
@@ -122,7 +116,9 @@ pub fn is_retryable_error(error_msg: &str, context_window: u64) -> bool {
 /// Uses exponential backoff: `base_delay_ms * 2^(attempt - 1)`,
 /// capped at `max_delay_ms`.
 pub fn calculate_delay(config: &RetryConfig, attempt: u32) -> u64 {
-    let delay = config.base_delay_ms.saturating_mul(1u64 << (attempt.saturating_sub(1)));
+    let delay = config
+        .base_delay_ms
+        .saturating_mul(1u64 << (attempt.saturating_sub(1)));
     delay.min(config.max_delay_ms)
 }
 
@@ -141,13 +137,28 @@ mod tests {
 
     #[test]
     fn test_is_context_overflow() {
-        assert!(is_context_overflow("maximum context length exceeded", 128000));
-        assert!(is_context_overflow("This model's context window is 8192", 128000));
+        assert!(is_context_overflow(
+            "maximum context length exceeded",
+            128000
+        ));
+        assert!(is_context_overflow(
+            "This model's context window is 8192",
+            128000
+        ));
         assert!(is_context_overflow("Too many tokens in the prompt", 128000));
-        assert!(is_context_overflow("Input is too long for this model", 128000));
+        assert!(is_context_overflow(
+            "Input is too long for this model",
+            128000
+        ));
         assert!(is_context_overflow("Request too large", 128000));
-        assert!(is_context_overflow("Exceeds the model's maximum context", 128000));
-        assert!(is_context_overflow("Please reduce the length of the messages", 128000));
+        assert!(is_context_overflow(
+            "Exceeds the model's maximum context",
+            128000
+        ));
+        assert!(is_context_overflow(
+            "Please reduce the length of the messages",
+            128000
+        ));
 
         // NOT context overflow
         assert!(!is_context_overflow("rate limit exceeded", 128000));
@@ -170,7 +181,10 @@ mod tests {
         assert!(is_retryable_error("network error occurred", 128000));
 
         // NOT retryable (context overflow)
-        assert!(!is_retryable_error("maximum context length exceeded", 128000));
+        assert!(!is_retryable_error(
+            "maximum context length exceeded",
+            128000
+        ));
         assert!(!is_retryable_error("too many tokens", 128000));
 
         // NOT retryable (unknown)

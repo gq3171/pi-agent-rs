@@ -19,6 +19,21 @@ fn create_new_restricted(path: &Path) -> std::io::Result<std::fs::File> {
     opts.open(path)
 }
 
+fn parse_timestamp_value(value: &serde_json::Value) -> Option<i64> {
+    match value {
+        serde_json::Value::Number(n) => n.as_i64(),
+        serde_json::Value::String(s) => {
+            if let Ok(ms) = s.parse::<i64>() {
+                return Some(ms);
+            }
+            chrono::DateTime::parse_from_rfc3339(s)
+                .ok()
+                .map(|dt| dt.timestamp_millis())
+        }
+        _ => None,
+    }
+}
+
 /// Manages session files in JSONL format.
 pub struct SessionManager {
     base_dir: PathBuf,
@@ -40,9 +55,11 @@ impl SessionManager {
     /// Validate that a session ID is safe (no path traversal).
     fn validate_session_id(session_id: &str) -> Result<(), CodingAgentError> {
         if session_id.is_empty() {
-            return Err(CodingAgentError::Session("Session ID cannot be empty".to_string()));
+            return Err(CodingAgentError::Session(
+                "Session ID cannot be empty".to_string(),
+            ));
         }
-        // Only allow UUID-safe characters: alphanumeric, hyphen, underscore
+
         if !session_id
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -51,6 +68,7 @@ impl SessionManager {
                 "Invalid session ID: {session_id} (only [a-zA-Z0-9_-] allowed)"
             )));
         }
+
         Ok(())
     }
 
@@ -70,20 +88,19 @@ impl SessionManager {
         paths::ensure_dir(&dir)?;
 
         let header = SessionHeader {
-            version: CURRENT_SESSION_VERSION,
-            session_id: session_id.to_string(),
-            parent_session_id: None,
-            parent_entry_id: None,
-            created_at: chrono::Utc::now().timestamp_millis(),
-            title: title.map(|s| s.to_string()),
+            entry_type: "session".to_string(),
+            version: Some(CURRENT_SESSION_VERSION),
+            id: session_id.to_string(),
+            timestamp: now_iso_timestamp(),
+            cwd: String::new(),
+            parent_session: None,
+            title: title.map(ToString::to_string),
         };
 
         let path = self.session_path(session_id);
         let mut file = create_new_restricted(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
-                CodingAgentError::Session(format!(
-                    "Session already exists: {session_id}"
-                ))
+                CodingAgentError::Session(format!("Session already exists: {session_id}"))
             } else {
                 CodingAgentError::Io(e)
             }
@@ -111,13 +128,18 @@ impl SessionManager {
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
 
-        // First line is the header
         let header_line = lines
             .next()
             .ok_or_else(|| CodingAgentError::Session("Empty session file".to_string()))??;
         let header: SessionHeader = serde_json::from_str(&header_line)?;
 
-        // Remaining lines are entries
+        if header.entry_type != "session" {
+            return Err(CodingAgentError::Session(format!(
+                "Invalid session header in {}",
+                path.display()
+            )));
+        }
+
         let mut entries = Vec::new();
         for line in lines {
             let line = line?;
@@ -126,9 +148,7 @@ impl SessionManager {
             }
             match serde_json::from_str::<SessionEntry>(&line) {
                 Ok(entry) => entries.push(entry),
-                Err(e) => {
-                    tracing::warn!("Skipping malformed session entry: {e}");
-                }
+                Err(e) => tracing::warn!("Skipping malformed session entry: {e}"),
             }
         }
 
@@ -156,7 +176,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Append multiple entries atomically.
+    /// Append multiple entries.
     pub fn append_entries(
         &self,
         session_id: &str,
@@ -201,7 +221,6 @@ impl SessionManager {
         Self::validate_session_id(new_session_id)?;
         let (source_header, source_entries) = self.open(source_session_id)?;
 
-        // Validate that the entry_id exists
         let entry_exists = source_entries.iter().any(|e| e.id() == source_entry_id);
         if !entry_exists {
             return Err(CodingAgentError::Session(format!(
@@ -209,7 +228,6 @@ impl SessionManager {
             )));
         }
 
-        // Collect entries up to and including the fork point
         let mut forked_entries = Vec::new();
         for entry in &source_entries {
             forked_entries.push(entry.clone());
@@ -218,17 +236,17 @@ impl SessionManager {
             }
         }
 
-        // Create new session
         let dir = self.sessions_dir();
         paths::ensure_dir(&dir)?;
 
         let header = SessionHeader {
-            version: CURRENT_SESSION_VERSION,
-            session_id: new_session_id.to_string(),
-            parent_session_id: Some(source_header.session_id.clone()),
-            parent_entry_id: Some(source_entry_id.to_string()),
-            created_at: chrono::Utc::now().timestamp_millis(),
-            title: source_header.title.clone(),
+            entry_type: "session".to_string(),
+            version: Some(CURRENT_SESSION_VERSION),
+            id: new_session_id.to_string(),
+            timestamp: now_iso_timestamp(),
+            cwd: source_header.cwd,
+            parent_session: Some(source_header.id),
+            title: source_header.title,
         };
 
         let path = self.session_path(new_session_id);
@@ -242,6 +260,7 @@ impl SessionManager {
                 CodingAgentError::Io(e)
             }
         })?;
+
         let header_line = serde_json::to_string(&header)?;
         writeln!(file, "{header_line}")?;
 
@@ -250,14 +269,14 @@ impl SessionManager {
             writeln!(file, "{line}")?;
         }
 
-        // Add a fork marker entry
-        let fork_entry = SessionEntry::Fork {
+        let fork_entry = SessionEntry::LegacyFork {
             id: SessionEntry::new_id(),
             parent_id: Some(source_entry_id.to_string()),
             timestamp: chrono::Utc::now().timestamp_millis(),
             source_session_id: source_session_id.to_string(),
             source_entry_id: source_entry_id.to_string(),
         };
+
         let fork_line = serde_json::to_string(&fork_entry)?;
         writeln!(file, "{fork_line}")?;
         forked_entries.push(fork_entry);
@@ -265,7 +284,7 @@ impl SessionManager {
         Ok((header, forked_entries))
     }
 
-    /// List all sessions sorted by updated_at descending (most recent first).
+    /// List all sessions sorted by updated_at descending.
     pub fn list(&self) -> Result<Vec<SessionInfo>, CodingAgentError> {
         let dir = self.sessions_dir();
         if !dir.exists() {
@@ -323,7 +342,7 @@ impl SessionManager {
         Ok(())
     }
 
-    /// Read session info (header + metadata) from a file without loading all entries.
+    /// Read lightweight session info from file.
     fn read_session_info(&self, path: &Path) -> Option<SessionInfo> {
         let file = std::fs::File::open(path).ok()?;
         let reader = BufReader::new(file);
@@ -331,31 +350,34 @@ impl SessionManager {
 
         let header_line = lines.next()?.ok()?;
         let header: SessionHeader = serde_json::from_str(&header_line).ok()?;
+        if header.entry_type != "session" {
+            return None;
+        }
 
-        let mut entry_count = 0;
-        let mut last_timestamp = header.created_at;
+        let mut entry_count = 0usize;
+        let mut last_timestamp = header.timestamp_ms();
+
         for line in lines.map_while(Result::ok) {
             if line.trim().is_empty() {
                 continue;
             }
+
             entry_count += 1;
-            // Try to extract timestamp without full deserialization
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&line) {
-                if let Some(ts) = val.get("timestamp").and_then(|v| v.as_i64()) {
-                    if ts > last_timestamp {
-                        last_timestamp = ts;
-                    }
+                if let Some(ts) = val.get("timestamp").and_then(parse_timestamp_value) {
+                    last_timestamp = last_timestamp.max(ts);
                 }
             }
         }
 
+        let created_at = header.timestamp_ms();
         Some(SessionInfo {
-            session_id: header.session_id,
+            session_id: header.id,
             title: header.title,
-            created_at: header.created_at,
+            created_at,
             updated_at: last_timestamp,
             entry_count,
-            parent_session_id: header.parent_session_id,
+            parent_session_id: header.parent_session,
         })
     }
 }
@@ -363,6 +385,26 @@ impl SessionManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pi_agent_core::types::{
+        AssistantMessage, ContentBlock, Message, StopReason, TextContent, Usage, UserContent,
+        UserMessage,
+    };
+
+    fn assistant_message() -> Message {
+        Message::Assistant(AssistantMessage {
+            content: vec![ContentBlock::Text(TextContent {
+                text: "Hello!".to_string(),
+                text_signature: None,
+            })],
+            api: "anthropic-messages".to_string(),
+            provider: "anthropic".to_string(),
+            model: "claude-sonnet".to_string(),
+            usage: Usage::default(),
+            stop_reason: StopReason::Stop,
+            error_message: None,
+            timestamp: chrono::Utc::now().timestamp_millis(),
+        })
+    }
 
     #[test]
     fn test_create_and_open_session() {
@@ -370,12 +412,12 @@ mod tests {
         let mgr = SessionManager::new(tmp.path());
 
         let header = mgr.create("test-session-1", Some("Test Session")).unwrap();
-        assert_eq!(header.session_id, "test-session-1");
+        assert_eq!(header.id, "test-session-1");
         assert_eq!(header.title, Some("Test Session".to_string()));
-        assert_eq!(header.version, CURRENT_SESSION_VERSION);
+        assert_eq!(header.version, Some(CURRENT_SESSION_VERSION));
 
         let (loaded_header, entries) = mgr.open("test-session-1").unwrap();
-        assert_eq!(loaded_header.session_id, "test-session-1");
+        assert_eq!(loaded_header.id, "test-session-1");
         assert!(entries.is_empty());
     }
 
@@ -386,19 +428,22 @@ mod tests {
 
         mgr.create("sess-1", None).unwrap();
 
-        let user_entry = SessionEntry::User {
+        let user_entry = SessionEntry::Message {
             id: "e1".to_string(),
             parent_id: None,
-            timestamp: 1000,
-            content: "Hello, agent!".to_string(),
+            timestamp: now_iso_timestamp(),
+            message: Message::User(UserMessage {
+                content: UserContent::Text("Hello, agent!".to_string()),
+                timestamp: chrono::Utc::now().timestamp_millis(),
+            }),
         };
         mgr.append_entry("sess-1", &user_entry).unwrap();
 
-        let assistant_entry = SessionEntry::Assistant {
+        let assistant_entry = SessionEntry::Message {
             id: "e2".to_string(),
             parent_id: Some("e1".to_string()),
-            timestamp: 1001,
-            message: serde_json::json!({"text": "Hello!"}),
+            timestamp: now_iso_timestamp(),
+            message: assistant_message(),
         };
         mgr.append_entry("sess-1", &assistant_entry).unwrap();
 
@@ -427,19 +472,19 @@ mod tests {
         let mgr = SessionManager::new(tmp.path());
 
         mgr.create("original", Some("Original")).unwrap();
-        let e1 = SessionEntry::User {
+        let e1 = SessionEntry::LegacyUser {
             id: "e1".to_string(),
             parent_id: None,
             timestamp: 1000,
             content: "First prompt".to_string(),
         };
-        let e2 = SessionEntry::Assistant {
+        let e2 = SessionEntry::LegacyAssistant {
             id: "e2".to_string(),
             parent_id: Some("e1".to_string()),
             timestamp: 1001,
-            message: serde_json::json!({"text": "Response 1"}),
+            message: serde_json::to_value(assistant_message()).unwrap(),
         };
-        let e3 = SessionEntry::User {
+        let e3 = SessionEntry::LegacyUser {
             id: "e3".to_string(),
             parent_id: Some("e2".to_string()),
             timestamp: 1002,
@@ -447,10 +492,8 @@ mod tests {
         };
         mgr.append_entries("original", &[e1, e2, e3]).unwrap();
 
-        // Fork from e2 (should include e1, e2 but not e3)
         let (fork_header, fork_entries) = mgr.fork_from("original", "e2", "forked").unwrap();
-        assert_eq!(fork_header.parent_session_id, Some("original".to_string()));
-        // e1, e2, plus fork marker = 3
+        assert_eq!(fork_header.parent_session, Some("original".to_string()));
         assert_eq!(fork_entries.len(), 3);
         assert_eq!(fork_entries[0].id(), "e1");
         assert_eq!(fork_entries[1].id(), "e2");
@@ -480,7 +523,7 @@ mod tests {
 
     #[test]
     fn test_session_entry_serde_round_trip() {
-        let entry = SessionEntry::ToolUse {
+        let entry = SessionEntry::LegacyToolUse {
             id: "t1".to_string(),
             parent_id: Some("e2".to_string()),
             timestamp: 2000,

@@ -1,5 +1,5 @@
-pub mod types;
 pub mod manager;
+pub mod types;
 
-pub use types::*;
 pub use manager::SettingsManager;
+pub use types::*;

@@ -96,11 +96,7 @@ impl SessionTree {
         result
     }
 
-    fn traverse_main_branch_from<'a>(
-        &'a self,
-        id: &str,
-        result: &mut Vec<&'a SessionEntry>,
-    ) {
+    fn traverse_main_branch_from<'a>(&'a self, id: &str, result: &mut Vec<&'a SessionEntry>) {
         if let Some(node) = self.nodes.get(id) {
             result.push(&node.entry);
             if let Some(first_child) = node.children.first() {
@@ -120,9 +116,7 @@ impl SessionTree {
 
     /// Check if an entry has branches (more than one child).
     pub fn has_branches(&self, id: &str) -> bool {
-        self.nodes
-            .get(id)
-            .is_some_and(|n| n.children.len() > 1)
+        self.nodes.get(id).is_some_and(|n| n.children.len() > 1)
     }
 
     /// Count total entries.
@@ -143,19 +137,19 @@ mod tests {
 
     fn make_entries() -> Vec<SessionEntry> {
         vec![
-            SessionEntry::User {
+            SessionEntry::LegacyUser {
                 id: "e1".to_string(),
                 parent_id: None,
                 timestamp: 1000,
                 content: "Hello".to_string(),
             },
-            SessionEntry::Assistant {
+            SessionEntry::LegacyAssistant {
                 id: "e2".to_string(),
                 parent_id: Some("e1".to_string()),
                 timestamp: 1001,
                 message: serde_json::json!({"text": "Hi!"}),
             },
-            SessionEntry::User {
+            SessionEntry::LegacyUser {
                 id: "e3".to_string(),
                 parent_id: Some("e2".to_string()),
                 timestamp: 1002,

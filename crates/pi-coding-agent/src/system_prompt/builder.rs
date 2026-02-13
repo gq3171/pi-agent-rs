@@ -1,5 +1,6 @@
 use pi_agent_core::types::Model;
 
+use crate::resources::loader::ContextFile;
 use crate::resources::skills::Skill;
 use crate::settings::types::Settings;
 
@@ -9,6 +10,7 @@ pub struct SystemPromptOptions<'a> {
     pub settings: &'a Settings,
     pub working_dir: &'a str,
     pub skills: &'a [Skill],
+    pub context_files: &'a [ContextFile],
     pub tool_names: &'a [String],
     pub custom_instructions: Option<&'a str>,
 }
@@ -23,42 +25,46 @@ pub struct SystemPromptOptions<'a> {
 /// - Custom instructions (from settings or project config)
 /// - Working directory context
 pub fn build_system_prompt(options: &SystemPromptOptions<'_>) -> String {
-    let mut parts = Vec::new();
+    let mut prompt = if let Some(custom_prompt) = &options.settings.system_prompt {
+        custom_prompt.clone()
+    } else {
+        build_default_prompt(options.model, options.tool_names)
+    };
 
-    // Base instructions
-    parts.push(build_base_instructions(options.model));
-
-    // System override from settings
-    if let Some(system_prompt) = &options.settings.system_prompt {
-        parts.push(system_prompt.clone());
-    }
-
-    // Working directory context
-    parts.push(format!("Working directory: {}", options.working_dir));
-
-    // Available tools
-    if !options.tool_names.is_empty() {
-        let tools_list = options.tool_names.join(", ");
-        parts.push(format!("Available tools: {tools_list}"));
-    }
-
-    // Skills
-    if !options.skills.is_empty() {
-        let skills_section = build_skills_section(options.skills);
-        parts.push(skills_section);
-    }
-
-    // Custom instructions
     if let Some(instructions) = options.custom_instructions {
-        parts.push(format!("Additional instructions:\n{instructions}"));
+        prompt.push_str("\n\n");
+        prompt.push_str(instructions);
     }
 
-    // Append system prompt from settings
     if let Some(append) = &options.settings.append_system_prompt {
-        parts.push(append.clone());
+        prompt.push_str("\n\n");
+        prompt.push_str(append);
     }
 
-    parts.join("\n\n")
+    if !options.context_files.is_empty() {
+        prompt.push_str("\n\n# Project Context\n\n");
+        prompt.push_str("Project-specific instructions and guidelines:\n\n");
+        for file in options.context_files {
+            prompt.push_str("## ");
+            prompt.push_str(&file.path);
+            prompt.push_str("\n\n");
+            prompt.push_str(&file.content);
+            prompt.push_str("\n\n");
+        }
+    }
+
+    if options.tool_names.iter().any(|t| t == "read") && !options.skills.is_empty() {
+        prompt.push_str("\n\n");
+        prompt.push_str(&build_skills_section(options.skills));
+    }
+
+    let date_time = chrono::Local::now().format("%A, %B %d, %Y %H:%M:%S %Z");
+    prompt.push_str("\nCurrent date and time: ");
+    prompt.push_str(&date_time.to_string());
+    prompt.push_str("\nCurrent working directory: ");
+    prompt.push_str(options.working_dir);
+
+    prompt
 }
 
 /// Build base instructions based on the model.
@@ -70,16 +76,60 @@ fn build_base_instructions(model: &Model) -> String {
     model_info
 }
 
+fn build_default_prompt(model: &Model, tools: &[String]) -> String {
+    let tools_list = if tools.is_empty() {
+        "(none)".to_string()
+    } else {
+        tools
+            .iter()
+            .map(|tool| {
+                let description = match tool.as_str() {
+                    "read" => "Read file contents",
+                    "bash" => "Execute shell commands",
+                    "edit" => "Make targeted file edits",
+                    "write" => "Create or overwrite files",
+                    "grep" => "Search file contents for patterns",
+                    "find" => "Find files by glob pattern",
+                    "ls" => "List directory contents",
+                    _ => "Custom tool",
+                };
+                format!("- {tool}: {description}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    let guidelines = [
+        "Be concise in your responses.",
+        "Show file paths clearly when working with files.",
+        "Prefer structured tools over shell commands when available.",
+        "Read files before editing them.",
+    ]
+    .join("\n- ");
+
+    format!(
+        "{}\n\nAvailable tools:\n{}\n\nGuidelines:\n- {}",
+        build_base_instructions(model),
+        tools_list,
+        guidelines
+    )
+}
+
 /// Build the skills section of the system prompt.
 fn build_skills_section(skills: &[Skill]) -> String {
-    let mut section = String::from("Available skills:\n");
+    let mut section = String::from(
+        "Available skills. Use read to open the skill file when the task matches:\n<available_skills>\n",
+    );
     for skill in skills {
-        section.push_str(&format!("- {}", skill.name));
+        section.push_str("  <skill>\n");
+        section.push_str(&format!("    <name>{}</name>\n", skill.name));
         if let Some(desc) = &skill.description {
-            section.push_str(&format!(": {desc}"));
+            section.push_str(&format!("    <description>{desc}</description>\n"));
         }
-        section.push('\n');
+        section.push_str(&format!("    <location>{}</location>\n", skill.source));
+        section.push_str("  </skill>\n");
     }
+    section.push_str("</available_skills>");
     section
 }
 
@@ -115,13 +165,15 @@ mod tests {
             settings: &settings,
             working_dir: "/home/user/project",
             skills: &[],
+            context_files: &[],
             tool_names: &["bash".to_string(), "read".to_string()],
             custom_instructions: None,
         });
 
         assert!(prompt.contains("Test Model"));
         assert!(prompt.contains("/home/user/project"));
-        assert!(prompt.contains("bash, read"));
+        assert!(prompt.contains("- bash:"));
+        assert!(prompt.contains("- read:"));
     }
 
     #[test]
@@ -142,7 +194,8 @@ mod tests {
             settings: &settings,
             working_dir: "/tmp",
             skills: &skills,
-            tool_names: &[],
+            context_files: &[],
+            tool_names: &["read".to_string()],
             custom_instructions: None,
         });
 
@@ -160,6 +213,7 @@ mod tests {
             settings: &settings,
             working_dir: "/tmp",
             skills: &[],
+            context_files: &[],
             tool_names: &[],
             custom_instructions: Some("Always use Rust"),
         });

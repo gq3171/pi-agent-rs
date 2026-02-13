@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::json_parse::parse_streaming_json;
 use pi_agent_core::sanitize::sanitize_surrogates;
 use pi_agent_core::transform::transform_messages;
@@ -21,9 +23,23 @@ use crate::sse::SseParser;
 const CLAUDE_CODE_VERSION: &str = "2.1.2";
 
 const CLAUDE_CODE_TOOLS: &[&str] = &[
-    "Read", "Write", "Edit", "Bash", "Grep", "Glob", "AskUserQuestion",
-    "EnterPlanMode", "ExitPlanMode", "KillShell", "NotebookEdit", "Skill",
-    "Task", "TaskOutput", "TodoWrite", "WebFetch", "WebSearch",
+    "Read",
+    "Write",
+    "Edit",
+    "Bash",
+    "Grep",
+    "Glob",
+    "AskUserQuestion",
+    "EnterPlanMode",
+    "ExitPlanMode",
+    "KillShell",
+    "NotebookEdit",
+    "Skill",
+    "Task",
+    "TaskOutput",
+    "TodoWrite",
+    "WebFetch",
+    "WebSearch",
 ];
 
 fn to_claude_code_name(name: &str) -> String {
@@ -119,7 +135,13 @@ fn map_thinking_level_to_effort(level: &ThinkingLevel) -> &'static str {
 fn normalize_tool_call_id(id: &str) -> String {
     let normalized: String = id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if normalized.len() > 64 {
         normalized[..64].to_string()
@@ -128,7 +150,11 @@ fn normalize_tool_call_id(id: &str) -> String {
     }
 }
 
-fn normalize_tool_call_id_for_transform(id: &str, _model: &Model, _source: &AssistantMessage) -> String {
+fn normalize_tool_call_id_for_transform(
+    id: &str,
+    _model: &Model,
+    _source: &AssistantMessage,
+) -> String {
     normalize_tool_call_id(id)
 }
 
@@ -184,7 +210,9 @@ fn convert_content_blocks(content: &[ContentBlock]) -> Value {
         .collect();
 
     // If only images, add placeholder text
-    let has_text = blocks.iter().any(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"));
+    let has_text = blocks
+        .iter()
+        .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"));
     if !has_text {
         blocks.insert(0, json!({"type": "text", "text": "(see attached image)"}));
     }
@@ -201,7 +229,8 @@ fn convert_messages(
     cache_control: &Option<Value>,
     _tools: Option<&[Tool]>,
 ) -> Vec<Value> {
-    let transformed = transform_messages(messages, model, Some(&normalize_tool_call_id_for_transform));
+    let transformed =
+        transform_messages(messages, model, Some(&normalize_tool_call_id_for_transform));
 
     let mut params: Vec<Value> = Vec::new();
 
@@ -210,57 +239,55 @@ fn convert_messages(
         let msg = &transformed[i];
 
         match msg {
-            Message::User(user_msg) => {
-                match &user_msg.content {
-                    UserContent::Text(text) => {
-                        if !text.trim().is_empty() {
-                            params.push(json!({
-                                "role": "user",
-                                "content": sanitize_surrogates(text)
-                            }));
-                        }
-                    }
-                    UserContent::Blocks(blocks) => {
-                        let filtered: Vec<Value> = blocks
-                            .iter()
-                            .filter_map(|block| match block {
-                                ContentBlock::Text(t) => {
-                                    if t.text.trim().is_empty() {
-                                        None
-                                    } else {
-                                        Some(json!({
-                                            "type": "text",
-                                            "text": sanitize_surrogates(&t.text)
-                                        }))
-                                    }
-                                }
-                                ContentBlock::Image(img) => {
-                                    if model.input.contains(&"image".to_string()) {
-                                        Some(json!({
-                                            "type": "image",
-                                            "source": {
-                                                "type": "base64",
-                                                "media_type": img.mime_type,
-                                                "data": img.data
-                                            }
-                                        }))
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            })
-                            .collect();
-
-                        if !filtered.is_empty() {
-                            params.push(json!({
-                                "role": "user",
-                                "content": filtered
-                            }));
-                        }
+            Message::User(user_msg) => match &user_msg.content {
+                UserContent::Text(text) => {
+                    if !text.trim().is_empty() {
+                        params.push(json!({
+                            "role": "user",
+                            "content": sanitize_surrogates(text)
+                        }));
                     }
                 }
-            }
+                UserContent::Blocks(blocks) => {
+                    let filtered: Vec<Value> = blocks
+                        .iter()
+                        .filter_map(|block| match block {
+                            ContentBlock::Text(t) => {
+                                if t.text.trim().is_empty() {
+                                    None
+                                } else {
+                                    Some(json!({
+                                        "type": "text",
+                                        "text": sanitize_surrogates(&t.text)
+                                    }))
+                                }
+                            }
+                            ContentBlock::Image(img) => {
+                                if model.input.contains(&"image".to_string()) {
+                                    Some(json!({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": img.mime_type,
+                                            "data": img.data
+                                        }
+                                    }))
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        })
+                        .collect();
+
+                    if !filtered.is_empty() {
+                        params.push(json!({
+                            "role": "user",
+                            "content": filtered
+                        }));
+                    }
+                }
+            },
             Message::Assistant(assistant_msg) => {
                 let mut blocks: Vec<Value> = Vec::new();
 
@@ -278,7 +305,10 @@ fn convert_messages(
                             if t.thinking.trim().is_empty() {
                                 continue;
                             }
-                            if t.thinking_signature.as_ref().is_some_and(|s| !s.trim().is_empty()) {
+                            if t.thinking_signature
+                                .as_ref()
+                                .is_some_and(|s| !s.trim().is_empty())
+                            {
                                 blocks.push(json!({
                                     "type": "thinking",
                                     "thinking": sanitize_surrogates(&t.thinking),
@@ -411,12 +441,22 @@ fn build_params(
     is_oauth: bool,
     options: &AnthropicOptions,
 ) -> Value {
-    let (_, cache_control) = get_cache_control(&model.base_url, options.base.cache_retention.as_ref());
+    let (_, cache_control) =
+        get_cache_control(&model.base_url, options.base.cache_retention.as_ref());
 
     let tools_slice: Option<&[Tool]> = context.tools.as_deref();
-    let messages = convert_messages(&context.messages, model, is_oauth, &cache_control, tools_slice);
+    let messages = convert_messages(
+        &context.messages,
+        model,
+        is_oauth,
+        &cache_control,
+        tools_slice,
+    );
 
-    let max_tokens = options.base.max_tokens.unwrap_or((model.max_tokens / 3).max(1));
+    let max_tokens = options
+        .base
+        .max_tokens
+        .unwrap_or((model.max_tokens / 3).max(1));
 
     let mut params = json!({
         "model": model.id,
@@ -513,17 +553,17 @@ fn build_headers(
     if is_oauth {
         headers.insert(
             "anthropic-beta".to_string(),
-            format!("claude-code-20250219,oauth-2025-04-20,{}", beta_features.join(",")),
+            format!(
+                "claude-code-20250219,oauth-2025-04-20,{}",
+                beta_features.join(",")
+            ),
         );
         headers.insert(
             "user-agent".to_string(),
             format!("claude-cli/{CLAUDE_CODE_VERSION} (external, cli)"),
         );
         headers.insert("x-app".to_string(), "cli".to_string());
-        headers.insert(
-            "authorization".to_string(),
-            format!("Bearer {api_key}"),
-        );
+        headers.insert("authorization".to_string(), format!("Bearer {api_key}"));
     } else {
         headers.insert("anthropic-beta".to_string(), beta_features.join(","));
         headers.insert("x-api-key".to_string(), api_key.to_string());
@@ -666,19 +706,38 @@ pub fn stream_anthropic(
                     "message_start" => {
                         if let Some(message) = data.get("message") {
                             if let Some(usage) = message.get("usage") {
-                                output.usage.input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                output.usage.output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                output.usage.cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                output.usage.cache_write = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                                output.usage.total_tokens = output.usage.input + output.usage.output + output.usage.cache_read + output.usage.cache_write;
+                                output.usage.input = usage
+                                    .get("input_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                output.usage.output = usage
+                                    .get("output_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                output.usage.cache_read = usage
+                                    .get("cache_read_input_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                output.usage.cache_write = usage
+                                    .get("cache_creation_input_tokens")
+                                    .and_then(|v| v.as_u64())
+                                    .unwrap_or(0);
+                                output.usage.total_tokens = output.usage.input
+                                    + output.usage.output
+                                    + output.usage.cache_read
+                                    + output.usage.cache_write;
                                 calculate_cost(&model, &mut output.usage);
                             }
                         }
                     }
                     "content_block_start" => {
-                        let index = data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let index =
+                            data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         let content_block = data.get("content_block").unwrap_or(&Value::Null);
-                        let block_type = content_block.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                        let block_type = content_block
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
 
                         match block_type {
                             "text" => {
@@ -713,8 +772,16 @@ pub fn stream_anthropic(
                                 });
                             }
                             "tool_use" => {
-                                let id = content_block.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                                let name = content_block.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                                let id = content_block
+                                    .get("id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let name = content_block
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
                                 let name = if is_oauth {
                                     from_claude_code_name(&name, tools_slice)
                                 } else {
@@ -741,7 +808,8 @@ pub fn stream_anthropic(
                         }
                     }
                     "content_block_delta" => {
-                        let index = data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let index =
+                            data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         let ci = block_indices.get(index).copied().unwrap_or(0);
                         let delta = data.get("delta").unwrap_or(&Value::Null);
                         let delta_type = delta.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -759,8 +827,10 @@ pub fn stream_anthropic(
                                 });
                             }
                             "thinking_delta" => {
-                                let thinking = delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
-                                if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci) {
+                                let thinking =
+                                    delta.get("thinking").and_then(|v| v.as_str()).unwrap_or("");
+                                if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci)
+                                {
                                     t.thinking.push_str(thinking);
                                 }
                                 stream_clone.push(AssistantMessageEvent::ThinkingDelta {
@@ -770,10 +840,15 @@ pub fn stream_anthropic(
                                 });
                             }
                             "input_json_delta" => {
-                                let partial_json_text = delta.get("partial_json").and_then(|v| v.as_str()).unwrap_or("");
+                                let partial_json_text = delta
+                                    .get("partial_json")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
                                 if let Some(pj) = partial_json_map.get_mut(&ci) {
                                     pj.push_str(partial_json_text);
-                                    if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(ci) {
+                                    if let Some(ContentBlock::ToolCall(tc)) =
+                                        output.content.get_mut(ci)
+                                    {
                                         tc.arguments = parse_streaming_json(pj);
                                     }
                                 }
@@ -784,9 +859,14 @@ pub fn stream_anthropic(
                                 });
                             }
                             "signature_delta" => {
-                                let sig = delta.get("signature").and_then(|v| v.as_str()).unwrap_or("");
-                                if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci) {
-                                    let current = t.thinking_signature.get_or_insert_with(String::new);
+                                let sig = delta
+                                    .get("signature")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                if let Some(ContentBlock::Thinking(t)) = output.content.get_mut(ci)
+                                {
+                                    let current =
+                                        t.thinking_signature.get_or_insert_with(String::new);
                                     current.push_str(sig);
                                 }
                             }
@@ -794,7 +874,8 @@ pub fn stream_anthropic(
                         }
                     }
                     "content_block_stop" => {
-                        let index = data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                        let index =
+                            data.get("index").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                         let ci = block_indices.get(index).copied().unwrap_or(0);
 
                         // Determine block type and extract needed data without holding borrow
@@ -806,7 +887,9 @@ pub fn stream_anthropic(
                         }
                         let action = match output.content.get(ci) {
                             Some(ContentBlock::Text(t)) => BlockAction::Text(t.text.clone()),
-                            Some(ContentBlock::Thinking(t)) => BlockAction::Thinking(t.thinking.clone()),
+                            Some(ContentBlock::Thinking(t)) => {
+                                BlockAction::Thinking(t.thinking.clone())
+                            }
                             Some(ContentBlock::ToolCall(_)) => BlockAction::ToolCall,
                             _ => BlockAction::None,
                         };
@@ -829,11 +912,15 @@ pub fn stream_anthropic(
                             BlockAction::ToolCall => {
                                 // Final parse of accumulated JSON
                                 if let Some(pj) = partial_json_map.remove(&ci) {
-                                    if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(ci) {
+                                    if let Some(ContentBlock::ToolCall(tc)) =
+                                        output.content.get_mut(ci)
+                                    {
                                         tc.arguments = parse_streaming_json(&pj);
                                     }
                                 }
-                                let final_tc = if let Some(ContentBlock::ToolCall(tc)) = output.content.get(ci) {
+                                let final_tc = if let Some(ContentBlock::ToolCall(tc)) =
+                                    output.content.get(ci)
+                                {
                                     tc.clone()
                                 } else {
                                     // Should not happen, but provide a fallback
@@ -855,7 +942,8 @@ pub fn stream_anthropic(
                     }
                     "message_delta" => {
                         if let Some(delta) = data.get("delta") {
-                            if let Some(reason) = delta.get("stop_reason").and_then(|v| v.as_str()) {
+                            if let Some(reason) = delta.get("stop_reason").and_then(|v| v.as_str())
+                            {
                                 output.stop_reason = map_stop_reason(reason);
                             }
                         }
@@ -866,13 +954,22 @@ pub fn stream_anthropic(
                             if let Some(v) = usage.get("output_tokens").and_then(|v| v.as_u64()) {
                                 output.usage.output = v;
                             }
-                            if let Some(v) = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()) {
+                            if let Some(v) = usage
+                                .get("cache_read_input_tokens")
+                                .and_then(|v| v.as_u64())
+                            {
                                 output.usage.cache_read = v;
                             }
-                            if let Some(v) = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()) {
+                            if let Some(v) = usage
+                                .get("cache_creation_input_tokens")
+                                .and_then(|v| v.as_u64())
+                            {
                                 output.usage.cache_write = v;
                             }
-                            output.usage.total_tokens = output.usage.input + output.usage.output + output.usage.cache_read + output.usage.cache_write;
+                            output.usage.total_tokens = output.usage.input
+                                + output.usage.output
+                                + output.usage.cache_read
+                                + output.usage.cache_write;
                             calculate_cost(&model, &mut output.usage);
                         }
                     }
@@ -880,7 +977,8 @@ pub fn stream_anthropic(
                         // Stream complete
                     }
                     "error" => {
-                        let error_msg = data.get("error")
+                        let error_msg = data
+                            .get("error")
                             .and_then(|e| e.get("message"))
                             .and_then(|m| m.as_str())
                             .unwrap_or("Unknown error")

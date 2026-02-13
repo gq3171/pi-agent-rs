@@ -27,7 +27,7 @@ Agent 运行时核心，提供：
 
 AI 模型接入层，提供：
 
-- **模型注册表** — 内置 60+ 模型定义（Anthropic、OpenAI、Google、AWS Bedrock、Azure）
+- **模型注册表** — 内置 700+ 模型定义（Anthropic、OpenAI、Google、AWS Bedrock、Azure）
 - **Provider 适配器** — 各厂商 API 的请求构建、响应解析、SSE 流处理
 - **OAuth 模块** — PKCE 授权码流程，支持 5 个 Provider（Anthropic、GitHub Copilot、OpenAI Codex、Google Antigravity、Google Gemini CLI）
 - **SSE 解析器** — Server-Sent Events 流式解析
@@ -43,13 +43,16 @@ AI 模型接入层，提供：
 | `auth` | 多层凭证解析（运行时 > 文件 > 环境变量） |
 | `session` | JSONL 会话持久化、树结构分支、上下文重建 |
 | `messages` | 自定义消息类型、AgentMessage → LLM Message 转换 |
-| `tools` | Bash / Read / Write / Edit 四个核心工具实现 |
+| `tools` | Bash / Read / Write / Edit / Find / Grep / Ls 工具实现 |
 | `model` | 模型注册表（内置 + 自定义）、模糊匹配、循环切换 |
 | `compaction` | Token 估算、会话压缩、分支摘要 |
-| `resources` | Skill 加载（Markdown + YAML frontmatter） |
+| `resources` | Skill / Prompt / Theme 加载、包资源路径元数据、PackageManager |
 | `system_prompt` | 系统提示词组装 |
 | `agent_session` | AgentSession 编排器、事件系统、`create_agent_session()` 工厂 |
-| `extensions` | 扩展接口定义（trait only） |
+| `extensions` | 扩展运行时（loader / runner / wrapper）、路径发现、外部命令扩展桥接 |
+| `modes` | Interactive / Print / RPC 模式运行器 |
+| `slash_commands` | 内置 Slash Commands 定义 |
+| `keybindings` | 默认热键与 keybindings.json 解析 |
 
 ## 构建与测试
 
@@ -57,7 +60,7 @@ AI 模型接入层，提供：
 # 编译
 cargo build --workspace
 
-# 测试（325 个测试）
+# 测试（370 个测试）
 cargo test --workspace
 
 # Clippy 检查
@@ -66,7 +69,7 @@ cargo clippy --workspace
 
 ## 设计要点
 
-- **Serde 兼容** — 全部 `#[serde(rename_all = "camelCase")]`，JSONL 会话文件与 TypeScript 版完全互通
+- **会话兼容** — JSONL 会话格式对齐 `pi-mono` v3，并兼容读取旧版 Rust 会话文件
 - **异步优先** — 基于 Tokio，工具执行支持 `CancellationToken` 协作取消
 - **错误处理** — `thiserror` 定义结构化错误类型，工具层使用 `Box<dyn Error + Send + Sync>`
 - **跨平台** — 进程管理 Unix 使用 `nix::killpg`，Windows 预留接口

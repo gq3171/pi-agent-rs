@@ -170,8 +170,7 @@ fn find_cut_point(messages: &[AgentMessage], keep_recent_tokens: u64) -> usize {
 // Compaction summary format — aligned with pi-mono messages.ts:11-17
 // ============================================================================
 
-pub const COMPACTION_SUMMARY_PREFIX: &str =
-    "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
+pub const COMPACTION_SUMMARY_PREFIX: &str = "The conversation history before this point was compacted into the following summary:\n\n<summary>\n";
 pub const COMPACTION_SUMMARY_SUFFIX: &str = "\n</summary>";
 
 // ============================================================================
@@ -352,10 +351,7 @@ mod tests {
 
     #[test]
     fn test_prepare_compaction_all_fits() {
-        let messages = vec![
-            AgentMessage::user("Hello"),
-            AgentMessage::user("World"),
-        ];
+        let messages = vec![AgentMessage::user("Hello"), AgentMessage::user("World")];
 
         let settings = CompactionSettings {
             enabled: true,

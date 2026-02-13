@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::types::*;
 
 use crate::env_keys::get_env_api_key;
@@ -14,8 +16,8 @@ use crate::simple_options::{build_base_options, clamp_reasoning};
 use crate::sse::SseParser;
 
 use super::openai_responses_shared::{
-    convert_responses_messages, convert_responses_tools,
-    process_responses_events, OpenAIResponsesStreamOptions,
+    OpenAIResponsesStreamOptions, convert_responses_messages, convert_responses_tools,
+    process_responses_events,
 };
 
 // =============================================================================
@@ -34,9 +36,9 @@ fn openai_tool_call_providers() -> HashSet<&'static str> {
 #[derive(Debug, Clone)]
 pub struct OpenAIResponsesOptions {
     pub base: StreamOptions,
-    pub reasoning_effort: Option<String>,   // "minimal" | "low" | "medium" | "high" | "xhigh"
-    pub reasoning_summary: Option<String>,  // "auto" | "detailed" | "concise" | null
-    pub service_tier: Option<String>,       // "flex" | "priority" | "auto" | etc.
+    pub reasoning_effort: Option<String>, // "minimal" | "low" | "medium" | "high" | "xhigh"
+    pub reasoning_summary: Option<String>, // "auto" | "detailed" | "concise" | null
+    pub service_tier: Option<String>,     // "flex" | "priority" | "auto" | etc.
 }
 
 // =============================================================================
@@ -90,7 +92,8 @@ fn apply_service_tier_pricing(usage: &mut Usage, service_tier: Option<&str>) {
     usage.cost.output *= multiplier;
     usage.cost.cache_read *= multiplier;
     usage.cost.cache_write *= multiplier;
-    usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
+    usage.cost.total =
+        usage.cost.input + usage.cost.output + usage.cost.cache_read + usage.cost.cache_write;
 }
 
 // =============================================================================
@@ -121,7 +124,10 @@ fn build_headers(
             "X-Initiator".to_string(),
             if is_agent_call { "agent" } else { "user" }.to_string(),
         );
-        headers.insert("Openai-Intent".to_string(), "conversation-edits".to_string());
+        headers.insert(
+            "Openai-Intent".to_string(),
+            "conversation-edits".to_string(),
+        );
 
         // Copilot requires this header when sending images
         let has_images = messages.iter().any(|msg| match msg {
@@ -156,9 +162,8 @@ fn build_params(
     let providers = openai_tool_call_providers();
     let input_messages = convert_responses_messages(model, context, &providers, None);
 
-    let cache_retention = resolve_cache_retention(
-        options.and_then(|o| o.base.cache_retention.as_ref()),
-    );
+    let cache_retention =
+        resolve_cache_retention(options.and_then(|o| o.base.cache_retention.as_ref()));
 
     let mut params = json!({
         "model": model.id,

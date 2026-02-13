@@ -145,10 +145,7 @@ pub fn serialize_conversation(messages: &[AgentMessage]) -> String {
 
                 // Emit tool calls as a single line
                 if !tool_calls.is_empty() {
-                    parts.push(format!(
-                        "[Assistant tool calls]: {}",
-                        tool_calls.join("; ")
-                    ));
+                    parts.push(format!("[Assistant tool calls]: {}", tool_calls.join("; ")));
                 }
             }
             AgentMessage::Llm(Message::ToolResult(m)) => {
@@ -195,13 +192,12 @@ pub fn generate_summary_context(messages: &[AgentMessage]) -> String {
 /// - Without `previous_summary`: uses `SUMMARIZATION_PROMPT` for a fresh summary.
 /// - With `previous_summary`: uses `UPDATE_SUMMARIZATION_PROMPT` to incrementally
 ///   update the existing summary with new conversation context.
-pub fn generate_summary_prompt(
-    conversation_text: &str,
-    previous_summary: Option<&str>,
-) -> String {
+pub fn generate_summary_prompt(conversation_text: &str, previous_summary: Option<&str>) -> String {
     match previous_summary {
         None => {
-            format!("{SUMMARIZATION_PROMPT}\n\n<conversation>\n{conversation_text}\n</conversation>")
+            format!(
+                "{SUMMARIZATION_PROMPT}\n\n<conversation>\n{conversation_text}\n</conversation>"
+            )
         }
         Some(prev) => {
             format!(
@@ -342,8 +338,7 @@ mod tests {
 
     #[test]
     fn test_generate_summary_prompt_incremental() {
-        let prompt =
-            generate_summary_prompt("new conversation", Some("previous summary text"));
+        let prompt = generate_summary_prompt("new conversation", Some("previous summary text"));
         assert!(prompt.contains("Update the existing structured summary"));
         assert!(prompt.contains("<previous-summary>"));
         assert!(prompt.contains("previous summary text"));

@@ -13,11 +13,18 @@ use crate::types::*;
 pub struct AgentOptions {
     pub initial_state: Option<PartialAgentState>,
     pub convert_to_llm: Option<
-        Arc<dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync>,
+        Arc<
+            dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>>
+                + Send
+                + Sync,
+        >,
     >,
     pub transform_context: Option<
         Arc<
-            dyn Fn(Vec<AgentMessage>, CancellationToken) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
+            dyn Fn(
+                    Vec<AgentMessage>,
+                    CancellationToken,
+                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
                 + Send
                 + Sync,
         >,
@@ -73,11 +80,15 @@ pub struct Agent {
     state: AgentState,
     listeners: Vec<Box<dyn Fn(&AgentEvent) + Send + Sync>>,
     cancel_token: Option<CancellationToken>,
-    convert_to_llm:
-        Arc<dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync>,
+    convert_to_llm: Arc<
+        dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync,
+    >,
     transform_context: Option<
         Arc<
-            dyn Fn(Vec<AgentMessage>, CancellationToken) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
+            dyn Fn(
+                    Vec<AgentMessage>,
+                    CancellationToken,
+                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
                 + Send
                 + Sync,
         >,
@@ -149,9 +160,9 @@ impl Agent {
             }
         }
 
-        let convert_to_llm = opts.convert_to_llm.unwrap_or_else(|| {
-            Arc::new(|msgs: &[AgentMessage]| default_convert_to_llm(msgs))
-        });
+        let convert_to_llm = opts
+            .convert_to_llm
+            .unwrap_or_else(|| Arc::new(|msgs: &[AgentMessage]| default_convert_to_llm(msgs)));
 
         Agent {
             state,
@@ -371,7 +382,9 @@ impl Agent {
 
     pub async fn continue_run(&mut self) -> Result<(), String> {
         if self.state.is_streaming {
-            return Err("Agent is already processing. Wait for completion before continuing.".to_string());
+            return Err(
+                "Agent is already processing. Wait for completion before continuing.".to_string(),
+            );
         }
 
         if self.state.messages.is_empty() {
@@ -400,7 +413,11 @@ impl Agent {
         Ok(())
     }
 
-    async fn run_loop(&mut self, messages: Option<Vec<AgentMessage>>, skip_initial_steering_poll: bool) {
+    async fn run_loop(
+        &mut self,
+        messages: Option<Vec<AgentMessage>>,
+        skip_initial_steering_poll: bool,
+    ) {
         let cancel = CancellationToken::new();
         self.cancel_token = Some(cancel.clone());
         self.state.is_streaming = true;
@@ -510,12 +527,10 @@ impl Agent {
                     self.stream_fn.clone(),
                 ))
             } else {
-                Box::pin(agent_loop_continue(
-                    context,
-                    config,
-                    cancel.clone(),
-                    self.stream_fn.clone(),
-                ).map_err(|e| e)?)
+                Box::pin(
+                    agent_loop_continue(context, config, cancel.clone(), self.stream_fn.clone())
+                        .map_err(|e| e)?,
+                )
             };
 
             while let Some(event) = event_stream.next().await {
@@ -569,11 +584,7 @@ impl Agent {
                 provider: self.state.model.provider.clone(),
                 model: self.state.model.id.clone(),
                 usage: Usage::default(),
-                stop_reason: if self
-                    .cancel_token
-                    .as_ref()
-                    .is_some_and(|t| t.is_cancelled())
-                {
+                stop_reason: if self.cancel_token.as_ref().is_some_and(|t| t.is_cancelled()) {
                     StopReason::Aborted
                 } else {
                     StopReason::Error

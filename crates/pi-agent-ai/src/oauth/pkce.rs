@@ -192,7 +192,10 @@ mod tests {
         assert_eq!(url_encode("hello"), "hello");
         assert_eq!(url_encode("hello world"), "hello%20world");
         assert_eq!(url_encode("a=b&c=d"), "a%3Db%26c%3Dd");
-        assert_eq!(url_encode("http://localhost:8080"), "http%3A%2F%2Flocalhost%3A8080");
+        assert_eq!(
+            url_encode("http://localhost:8080"),
+            "http%3A%2F%2Flocalhost%3A8080"
+        );
     }
 
     #[test]
@@ -205,11 +208,17 @@ mod tests {
             &[],
         )
         .unwrap();
-        assert!(flow.auth_url.starts_with("https://auth.example.com/authorize?"));
+        assert!(
+            flow.auth_url
+                .starts_with("https://auth.example.com/authorize?")
+        );
         assert!(flow.auth_url.contains("client_id=my-client"));
         assert!(flow.auth_url.contains("response_type=code"));
         assert!(flow.auth_url.contains("scope=read%20write"));
-        assert!(flow.auth_url.contains(&format!("state={}", url_encode(&flow.state))));
+        assert!(
+            flow.auth_url
+                .contains(&format!("state={}", url_encode(&flow.state)))
+        );
         assert!(!flow.pkce.code_verifier.is_empty());
         assert!(!flow.state.is_empty());
     }

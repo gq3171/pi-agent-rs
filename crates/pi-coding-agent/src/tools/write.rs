@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
 use pi_agent_core::agent_types::{AgentTool, AgentToolResult};
@@ -145,9 +145,8 @@ impl AgentTool for WriteTool {
         let writer = self.writer.clone();
         let resolved_clone = resolved.clone();
         let content = content.to_string();
-        let io_task = tokio::task::spawn_blocking(move || {
-            writer.write_file(&resolved_clone, &content)
-        });
+        let io_task =
+            tokio::task::spawn_blocking(move || writer.write_file(&resolved_clone, &content));
 
         let output = tokio::select! {
             result = io_task => {
@@ -199,7 +198,10 @@ mod tests {
         let result = tool.execute("call_1", params, cancel, None).await.unwrap();
         let text = result.content[0].as_text().unwrap().text.clone();
         assert!(text.contains("Created"));
-        assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "Hello, World!");
+        assert_eq!(
+            std::fs::read_to_string(&file_path).unwrap(),
+            "Hello, World!"
+        );
     }
 
     #[tokio::test]
@@ -234,7 +236,13 @@ mod tests {
         let cancel = CancellationToken::new();
 
         let result = tool.execute("call_1", params, cancel, None).await.unwrap();
-        assert!(result.content[0].as_text().unwrap().text.contains("Created"));
+        assert!(
+            result.content[0]
+                .as_text()
+                .unwrap()
+                .text
+                .contains("Created")
+        );
         assert_eq!(std::fs::read_to_string(&file_path).unwrap(), "deep content");
     }
 }

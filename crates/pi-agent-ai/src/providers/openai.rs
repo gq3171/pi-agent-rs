@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::json_parse::parse_streaming_json;
 use pi_agent_core::sanitize::sanitize_surrogates;
 use pi_agent_core::transform::transform_messages;
@@ -91,7 +93,11 @@ fn normalize_tool_call_id(id: &str, model: &Model, compat: &ResolvedCompat) -> S
     }
 
     if model.provider == "openai" {
-        return if id.len() > 40 { id[..40].to_string() } else { id.to_string() };
+        return if id.len() > 40 {
+            id[..40].to_string()
+        } else {
+            id.to_string()
+        };
     }
 
     // Copilot Claude models route to Claude backend which requires Anthropic ID format
@@ -222,9 +228,7 @@ fn get_compat(model: &Model) -> ResolvedCompat {
         supports_usage_in_streaming: parsed
             .supports_usage_in_streaming
             .unwrap_or(detected.supports_usage_in_streaming),
-        max_tokens_field: parsed
-            .max_tokens_field
-            .unwrap_or(detected.max_tokens_field),
+        max_tokens_field: parsed.max_tokens_field.unwrap_or(detected.max_tokens_field),
         requires_tool_result_name: parsed
             .requires_tool_result_name
             .unwrap_or(detected.requires_tool_result_name),
@@ -237,9 +241,7 @@ fn get_compat(model: &Model) -> ResolvedCompat {
         requires_mistral_tool_ids: parsed
             .requires_mistral_tool_ids
             .unwrap_or(detected.requires_mistral_tool_ids),
-        thinking_format: parsed
-            .thinking_format
-            .unwrap_or(detected.thinking_format),
+        thinking_format: parsed.thinking_format.unwrap_or(detected.thinking_format),
         open_router_routing: parsed
             .open_router_routing
             .map(|r| serde_json::to_value(r).unwrap_or(json!({})))
@@ -271,11 +273,7 @@ fn map_stop_reason(reason: &str) -> StopReason {
 
 // ---------- Convert messages to OpenAI chat completion format ----------
 
-fn convert_messages(
-    model: &Model,
-    context: &Context,
-    compat: &ResolvedCompat,
-) -> Vec<Value> {
+fn convert_messages(model: &Model, context: &Context, compat: &ResolvedCompat) -> Vec<Value> {
     // Build a closure that captures compat for use inside transform_messages
     let compat_clone = compat.clone();
     let normalize_fn = move |id: &str, m: &Model, _a: &AssistantMessage| -> String {
@@ -667,11 +665,7 @@ fn maybe_add_openrouter_anthropic_cache_control(model: &Model, messages: &mut [V
 
 // ---------- Build request params ----------
 
-fn build_params(
-    model: &Model,
-    context: &Context,
-    options: &OpenAICompletionsOptions,
-) -> Value {
+fn build_params(model: &Model, context: &Context, options: &OpenAICompletionsOptions) -> Value {
     let compat = get_compat(model);
     let mut messages = convert_messages(model, context, &compat);
     maybe_add_openrouter_anthropic_cache_control(model, &mut messages);
@@ -727,7 +721,9 @@ fn build_params(
     } else if compat.thinking_format == "qwen" && model.reasoning {
         // Qwen uses enable_thinking: boolean
         params["enable_thinking"] = json!(options.reasoning_effort.is_some());
-    } else if options.reasoning_effort.is_some() && model.reasoning && compat.supports_reasoning_effort
+    } else if options.reasoning_effort.is_some()
+        && model.reasoning
+        && compat.supports_reasoning_effort
     {
         // OpenAI-style reasoning_effort
         params["reasoning_effort"] = json!(options.reasoning_effort.as_deref().unwrap_or(""));
@@ -788,14 +784,15 @@ fn build_headers(
     if model.provider == "github-copilot" {
         let messages = &context.messages;
         let last_msg = messages.last();
-        let is_agent_call = last_msg
-            .map(|m| m.role() != "user")
-            .unwrap_or(false);
+        let is_agent_call = last_msg.map(|m| m.role() != "user").unwrap_or(false);
         headers.insert(
             "X-Initiator".to_string(),
             if is_agent_call { "agent" } else { "user" }.to_string(),
         );
-        headers.insert("Openai-Intent".to_string(), "conversation-edits".to_string());
+        headers.insert(
+            "Openai-Intent".to_string(),
+            "conversation-edits".to_string(),
+        );
 
         // Copilot requires this header when sending images
         let has_images = messages.iter().any(|msg| match msg {
@@ -860,12 +857,7 @@ pub fn stream_openai_completions(
             return;
         }
 
-        let headers = build_headers(
-            &model,
-            &context,
-            &api_key,
-            options.base.headers.as_ref(),
-        );
+        let headers = build_headers(&model, &context, &api_key, options.base.headers.as_ref());
 
         let params = build_params(&model, &context, &options);
 
@@ -918,8 +910,8 @@ pub fn stream_openai_completions(
 
         // State for streaming: tracks current block being built
         enum CurrentBlock {
-            Text(usize),     // content_index
-            Thinking(usize), // content_index
+            Text(usize),             // content_index
+            Thinking(usize),         // content_index
             ToolCall(usize, String), // content_index, partial_args
         }
 
@@ -982,7 +974,9 @@ pub fn stream_openai_completions(
                         }
                     }
                     #[allow(unused_assignments)]
-                    { current_block = None; }
+                    {
+                        current_block = None;
+                    }
                 }
             };
         }
@@ -1062,9 +1056,14 @@ pub fn stream_openai_completions(
                         .and_then(|d| d.get("reasoning_tokens"))
                         .and_then(|v| v.as_u64())
                         .unwrap_or(0);
-                    let prompt_tokens = usage.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let completion_tokens =
-                        usage.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let prompt_tokens = usage
+                        .get("prompt_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let completion_tokens = usage
+                        .get("completion_tokens")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
 
                     // OpenAI includes cached tokens in prompt_tokens, so subtract to get non-cached input
                     let input = prompt_tokens.saturating_sub(cached_tokens);
@@ -1149,10 +1148,8 @@ pub fn stream_openai_completions(
                 }
 
                 if let Some(field_name) = found_reasoning_field {
-                    let reasoning_delta = delta
-                        .get(field_name)
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let reasoning_delta =
+                        delta.get(field_name).and_then(|v| v.as_str()).unwrap_or("");
 
                     let is_thinking = matches!(&current_block, Some(CurrentBlock::Thinking(_)));
                     if !is_thinking {
@@ -1225,30 +1222,25 @@ pub fn stream_openai_completions(
                                 thought_signature: None,
                             }));
                             let ci = output.content.len() - 1;
-                            current_block =
-                                Some(CurrentBlock::ToolCall(ci, String::new()));
+                            current_block = Some(CurrentBlock::ToolCall(ci, String::new()));
                             stream_clone.push(AssistantMessageEvent::ToolCallStart {
                                 content_index: ci,
                                 partial: output.clone(),
                             });
                         }
 
-                        if let Some(CurrentBlock::ToolCall(ci, partial_args)) =
-                            &mut current_block
-                        {
+                        if let Some(CurrentBlock::ToolCall(ci, partial_args)) = &mut current_block {
                             let ci = *ci;
                             // Update id if provided
                             if let Some(new_id) = tc_id {
-                                if let Some(ContentBlock::ToolCall(tc)) =
-                                    output.content.get_mut(ci)
+                                if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(ci)
                                 {
                                     tc.id = new_id.to_string();
                                 }
                             }
                             // Update name if provided
                             if let Some(new_name) = tc_fn_name {
-                                if let Some(ContentBlock::ToolCall(tc)) =
-                                    output.content.get_mut(ci)
+                                if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(ci)
                                 {
                                     tc.name = new_name.to_string();
                                 }
@@ -1258,8 +1250,7 @@ pub fn stream_openai_completions(
                             if let Some(args) = tc_fn_args {
                                 args_delta = args.to_string();
                                 partial_args.push_str(args);
-                                if let Some(ContentBlock::ToolCall(tc)) =
-                                    output.content.get_mut(ci)
+                                if let Some(ContentBlock::ToolCall(tc)) = output.content.get_mut(ci)
                                 {
                                     tc.arguments = parse_streaming_json(partial_args);
                                 }

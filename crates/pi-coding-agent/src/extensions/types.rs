@@ -1,10 +1,11 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use pi_agent_core::agent_types::AgentMessage;
+use pi_agent_core::agent_types::{AgentMessage, AgentToolResult};
 
 /// Defines a tool that can be provided by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +22,7 @@ pub struct ToolDefinition {
 }
 
 /// Context provided to extensions.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExtensionContext {
     /// Working directory.
     pub working_dir: PathBuf,
@@ -32,6 +33,20 @@ pub struct ExtensionContext {
     /// Extension-specific configuration from settings.
     pub config: Value,
 }
+
+/// Estimated context usage for the active model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContextUsage {
+    /// Estimated context tokens, or null if unknown (e.g. right after compaction).
+    pub tokens: Option<u64>,
+    pub context_window: u64,
+    /// Context usage percentage, or null when tokens are unknown.
+    pub percent: Option<f64>,
+}
+
+/// Factory for creating extension instances.
+pub type ExtensionFactory = Arc<dyn Fn() -> Box<dyn Extension + Send + Sync> + Send + Sync>;
 
 /// API surface available to extensions.
 #[async_trait]
@@ -44,6 +59,11 @@ pub trait ExtensionAPI: Send + Sync {
 
     /// Log a message (visible in debug output).
     fn log(&self, message: &str);
+
+    /// Get current context usage for the active model.
+    fn context_usage(&self) -> Option<ContextUsage> {
+        None
+    }
 }
 
 /// Events that extensions can receive.
@@ -60,14 +80,41 @@ pub enum ContextEvent {
     /// A file was edited.
     FileEdited { path: String },
     /// A command was executed.
-    CommandExecuted { command: String, exit_code: Option<i32> },
+    CommandExecuted {
+        command: String,
+        exit_code: Option<i32>,
+    },
+    /// A tool call is about to execute.
+    ToolCall {
+        tool_name: String,
+        tool_call_id: String,
+        input: Value,
+    },
+    /// A tool result has been produced.
+    ToolResult {
+        tool_name: String,
+        tool_call_id: String,
+        is_error: bool,
+    },
+}
+
+/// Decision returned by extensions before a tool call executes.
+#[derive(Debug, Clone)]
+pub enum ToolCallDecision {
+    /// Allow execution.
+    Allow,
+    /// Block execution with an optional reason.
+    Block { reason: Option<String> },
 }
 
 /// File operations interface for extensions.
 #[async_trait]
 pub trait FileOperations: Send + Sync {
     /// Read a file.
-    async fn read_file(&self, path: &str) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
+    async fn read_file(
+        &self,
+        path: &str,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>>;
     /// Write a file.
     async fn write_file(
         &self,
@@ -93,7 +140,10 @@ pub trait Extension: Send + Sync {
     fn name(&self) -> &str;
 
     /// Initialize the extension with context.
-    async fn init(&mut self, context: ExtensionContext) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn init(
+        &mut self,
+        context: ExtensionContext,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
     /// Get tool definitions provided by this extension.
     fn tools(&self) -> Vec<ToolDefinition> {
@@ -110,8 +160,32 @@ pub trait Extension: Send + Sync {
     }
 
     /// Handle a context event.
-    async fn on_event(&self, _event: ContextEvent) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    async fn on_event(
+        &self,
+        _event: ContextEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Ok(())
+    }
+
+    /// Inspect or block a tool call before it executes.
+    async fn on_tool_call(
+        &self,
+        _tool_name: &str,
+        _tool_call_id: &str,
+        _params: &Value,
+    ) -> Result<ToolCallDecision, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(ToolCallDecision::Allow)
+    }
+
+    /// Inspect or replace a tool result after execution.
+    async fn on_tool_result(
+        &self,
+        _tool_name: &str,
+        _tool_call_id: &str,
+        _result: &AgentToolResult,
+        _is_error: bool,
+    ) -> Result<Option<AgentToolResult>, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(None)
     }
 
     /// Shutdown the extension.

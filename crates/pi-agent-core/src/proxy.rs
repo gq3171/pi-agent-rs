@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::Value;
 
-use crate::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use crate::event_stream::{AssistantMessageEventStream, create_assistant_message_event_stream};
 use crate::json_parse::parse_streaming_json;
 use crate::types::*;
 
@@ -144,7 +144,8 @@ pub fn stream_proxy(
         use futures::StreamExt;
         let mut byte_stream = response.bytes_stream();
         let mut buffer = String::new();
-        let mut partial_json_map: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+        let mut partial_json_map: std::collections::HashMap<usize, String> =
+            std::collections::HashMap::new();
 
         while let Some(chunk_result) = byte_stream.next().await {
             let chunk = match chunk_result {
@@ -174,9 +175,11 @@ pub fn stream_proxy(
 
                     match serde_json::from_str::<ProxyAssistantMessageEvent>(data) {
                         Ok(proxy_event) => {
-                            if let Some(event) =
-                                process_proxy_event(proxy_event, &mut partial, &mut partial_json_map)
-                            {
+                            if let Some(event) = process_proxy_event(
+                                proxy_event,
+                                &mut partial,
+                                &mut partial_json_map,
+                            ) {
                                 stream_clone.push(event);
                             }
                         }
@@ -249,12 +252,13 @@ fn process_proxy_event(
             content_index,
             content_signature,
         } => {
-            let content = if let Some(ContentBlock::Text(t)) = partial.content.get_mut(content_index) {
-                t.text_signature = content_signature;
-                t.text.clone()
-            } else {
-                String::new()
-            };
+            let content =
+                if let Some(ContentBlock::Text(t)) = partial.content.get_mut(content_index) {
+                    t.text_signature = content_signature;
+                    t.text.clone()
+                } else {
+                    String::new()
+                };
             Some(AssistantMessageEvent::TextEnd {
                 content_index,
                 content,
@@ -297,12 +301,13 @@ fn process_proxy_event(
             content_index,
             content_signature,
         } => {
-            let content = if let Some(ContentBlock::Thinking(t)) = partial.content.get_mut(content_index) {
-                t.thinking_signature = content_signature;
-                t.thinking.clone()
-            } else {
-                String::new()
-            };
+            let content =
+                if let Some(ContentBlock::Thinking(t)) = partial.content.get_mut(content_index) {
+                    t.thinking_signature = content_signature;
+                    t.thinking.clone()
+                } else {
+                    String::new()
+                };
             Some(AssistantMessageEvent::ThinkingEnd {
                 content_index,
                 content,
@@ -353,11 +358,12 @@ fn process_proxy_event(
 
         ProxyAssistantMessageEvent::ToolcallEnd { content_index } => {
             partial_json_map.remove(&content_index);
-            let tool_call = if let Some(ContentBlock::ToolCall(tc)) = partial.content.get(content_index) {
-                tc.clone()
-            } else {
-                return None;
-            };
+            let tool_call =
+                if let Some(ContentBlock::ToolCall(tc)) = partial.content.get(content_index) {
+                    tc.clone()
+                } else {
+                    return None;
+                };
             Some(AssistantMessageEvent::ToolCallEnd {
                 content_index,
                 tool_call,

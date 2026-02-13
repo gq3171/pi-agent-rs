@@ -2,11 +2,7 @@ use std::collections::HashMap;
 
 /// Headers that must not be overridden by model or extra headers.
 /// These are security-sensitive authentication headers.
-const SENSITIVE_HEADERS: &[&str] = &[
-    "authorization",
-    "x-api-key",
-    "api-key",
-];
+const SENSITIVE_HEADERS: &[&str] = &["authorization", "x-api-key", "api-key"];
 
 /// Check whether a header key is sensitive (case-insensitive).
 fn is_sensitive(key: &str) -> bool {

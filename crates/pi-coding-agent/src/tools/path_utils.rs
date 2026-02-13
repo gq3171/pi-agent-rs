@@ -70,14 +70,10 @@ pub fn is_within(path: &Path, root: &Path) -> bool {
 /// Check if a file looks like a binary based on its extension.
 pub fn is_likely_binary(path: &Path) -> bool {
     let binary_extensions = [
-        "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg",
-        "mp3", "mp4", "wav", "ogg", "avi", "mov", "mkv",
-        "zip", "tar", "gz", "bz2", "xz", "7z", "rar",
-        "exe", "dll", "so", "dylib", "o", "a",
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-        "woff", "woff2", "ttf", "otf", "eot",
-        "class", "pyc", "pyo", "wasm",
-        "sqlite", "db",
+        "png", "jpg", "jpeg", "gif", "bmp", "ico", "webp", "svg", "mp3", "mp4", "wav", "ogg",
+        "avi", "mov", "mkv", "zip", "tar", "gz", "bz2", "xz", "7z", "rar", "exe", "dll", "so",
+        "dylib", "o", "a", "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "woff", "woff2",
+        "ttf", "otf", "eot", "class", "pyc", "pyo", "wasm", "sqlite", "db",
     ];
 
     path.extension()

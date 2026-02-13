@@ -245,7 +245,9 @@ impl Serialize for ContentBlock {
 impl<'de> Deserialize<'de> for ContentBlock {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        let obj = value.as_object().ok_or_else(|| serde::de::Error::custom("expected object"))?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("expected object"))?;
         let type_str = obj
             .get("type")
             .and_then(|v| v.as_str())
@@ -258,8 +260,14 @@ impl<'de> Deserialize<'de> for ContentBlock {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let text_signature = obj.get("textSignature").and_then(|v| v.as_str()).map(String::from);
-                Ok(ContentBlock::Text(TextContent { text, text_signature }))
+                let text_signature = obj
+                    .get("textSignature")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
+                Ok(ContentBlock::Text(TextContent {
+                    text,
+                    text_signature,
+                }))
             }
             "thinking" => {
                 let thinking = obj
@@ -290,9 +298,20 @@ impl<'de> Deserialize<'de> for ContentBlock {
                 Ok(ContentBlock::Image(ImageContent { data, mime_type }))
             }
             "toolCall" => {
-                let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let arguments = obj.get("arguments").cloned().unwrap_or(Value::Object(Default::default()));
+                let id = obj
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let name = obj
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let arguments = obj
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or(Value::Object(Default::default()));
                 let thought_signature = obj
                     .get("thoughtSignature")
                     .and_then(|v| v.as_str())
@@ -304,7 +323,9 @@ impl<'de> Deserialize<'de> for ContentBlock {
                     thought_signature,
                 }))
             }
-            other => Err(serde::de::Error::custom(format!("unknown content type: {other}"))),
+            other => Err(serde::de::Error::custom(format!(
+                "unknown content type: {other}"
+            ))),
         }
     }
 }
@@ -532,7 +553,9 @@ impl Serialize for Message {
 impl<'de> Deserialize<'de> for Message {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let value = Value::deserialize(deserializer)?;
-        let obj = value.as_object().ok_or_else(|| serde::de::Error::custom("expected object"))?;
+        let obj = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("expected object"))?;
         let role = obj
             .get("role")
             .and_then(|v| v.as_str())
@@ -540,26 +563,48 @@ impl<'de> Deserialize<'de> for Message {
 
         match role {
             "user" => {
-                let content: UserContent =
-                    serde_json::from_value(obj.get("content").cloned().unwrap_or(Value::String(String::new())))
-                        .map_err(serde::de::Error::custom)?;
+                let content: UserContent = serde_json::from_value(
+                    obj.get("content")
+                        .cloned()
+                        .unwrap_or(Value::String(String::new())),
+                )
+                .map_err(serde::de::Error::custom)?;
                 let timestamp = obj.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
                 Ok(Message::User(UserMessage { content, timestamp }))
             }
             "assistant" => {
-                let content: Vec<ContentBlock> =
-                    serde_json::from_value(obj.get("content").cloned().unwrap_or(Value::Array(vec![])))
-                        .map_err(serde::de::Error::custom)?;
-                let api = obj.get("api").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let provider = obj.get("provider").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                let model = obj.get("model").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let content: Vec<ContentBlock> = serde_json::from_value(
+                    obj.get("content").cloned().unwrap_or(Value::Array(vec![])),
+                )
+                .map_err(serde::de::Error::custom)?;
+                let api = obj
+                    .get("api")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let provider = obj
+                    .get("provider")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let model = obj
+                    .get("model")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 let usage: Usage =
                     serde_json::from_value(obj.get("usage").cloned().unwrap_or_default())
                         .unwrap_or_default();
-                let stop_reason: StopReason =
-                    serde_json::from_value(obj.get("stopReason").cloned().unwrap_or(Value::String("stop".into())))
-                        .unwrap_or(StopReason::Stop);
-                let error_message = obj.get("errorMessage").and_then(|v| v.as_str()).map(String::from);
+                let stop_reason: StopReason = serde_json::from_value(
+                    obj.get("stopReason")
+                        .cloned()
+                        .unwrap_or(Value::String("stop".into())),
+                )
+                .unwrap_or(StopReason::Stop);
+                let error_message = obj
+                    .get("errorMessage")
+                    .and_then(|v| v.as_str())
+                    .map(String::from);
                 let timestamp = obj.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
                 Ok(Message::Assistant(AssistantMessage {
                     content,
@@ -583,11 +628,15 @@ impl<'de> Deserialize<'de> for Message {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
-                let content: Vec<ContentBlock> =
-                    serde_json::from_value(obj.get("content").cloned().unwrap_or(Value::Array(vec![])))
-                        .map_err(serde::de::Error::custom)?;
+                let content: Vec<ContentBlock> = serde_json::from_value(
+                    obj.get("content").cloned().unwrap_or(Value::Array(vec![])),
+                )
+                .map_err(serde::de::Error::custom)?;
                 let details = obj.get("details").cloned();
-                let is_error = obj.get("isError").and_then(|v| v.as_bool()).unwrap_or(false);
+                let is_error = obj
+                    .get("isError")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let timestamp = obj.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
                 Ok(Message::ToolResult(ToolResultMessage {
                     tool_call_id,
@@ -700,7 +749,10 @@ impl AssistantMessageEvent {
     }
 
     pub fn is_complete(&self) -> bool {
-        matches!(self, AssistantMessageEvent::Done { .. } | AssistantMessageEvent::Error { .. })
+        matches!(
+            self,
+            AssistantMessageEvent::Done { .. } | AssistantMessageEvent::Error { .. }
+        )
     }
 }
 

@@ -29,8 +29,8 @@ pub fn parse_frontmatter<T: for<'de> Deserialize<'de>>(
         let body_start = end_pos + 4; // skip "\n---"
         let body = rest[body_start..].trim_start_matches(['\r', '\n']);
 
-        let parsed: T =
-            serde_yaml::from_str(yaml_str).map_err(|e| FrontmatterError::YamlParse(e.to_string()))?;
+        let parsed: T = serde_yaml::from_str(yaml_str)
+            .map_err(|e| FrontmatterError::YamlParse(e.to_string()))?;
 
         Ok((Some(parsed), body))
     } else {

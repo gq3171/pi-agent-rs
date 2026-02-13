@@ -239,11 +239,15 @@ pub struct AgentLoopConfig {
     pub session_id: Option<String>,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub max_retry_delay_ms: Option<u64>,
-    pub convert_to_llm:
-        Arc<dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync>,
+    pub convert_to_llm: Arc<
+        dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync,
+    >,
     pub transform_context: Option<
         Arc<
-            dyn Fn(Vec<AgentMessage>, CancellationToken) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
+            dyn Fn(
+                    Vec<AgentMessage>,
+                    CancellationToken,
+                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
                 + Send
                 + Sync,
         >,

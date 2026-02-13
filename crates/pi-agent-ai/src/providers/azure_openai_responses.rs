@@ -1,10 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use futures::StreamExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 
-use pi_agent_core::event_stream::{create_assistant_message_event_stream, AssistantMessageEventStream};
+use pi_agent_core::event_stream::{
+    AssistantMessageEventStream, create_assistant_message_event_stream,
+};
 use pi_agent_core::types::*;
 
 use crate::env_keys::get_env_api_key;
@@ -14,8 +16,7 @@ use crate::simple_options::{build_base_options, clamp_reasoning};
 use crate::sse::SseParser;
 
 use super::openai_responses_shared::{
-    convert_responses_messages, convert_responses_tools,
-    process_responses_events,
+    convert_responses_messages, convert_responses_tools, process_responses_events,
 };
 
 // =============================================================================
@@ -25,9 +26,14 @@ use super::openai_responses_shared::{
 const DEFAULT_AZURE_API_VERSION: &str = "v1";
 
 fn azure_tool_call_providers() -> HashSet<&'static str> {
-    ["openai", "openai-codex", "opencode", "azure-openai-responses"]
-        .into_iter()
-        .collect()
+    [
+        "openai",
+        "openai-codex",
+        "opencode",
+        "azure-openai-responses",
+    ]
+    .into_iter()
+    .collect()
 }
 
 // =============================================================================
@@ -585,7 +591,10 @@ mod tests {
             azure_base_url: None,
             azure_deployment_name: Some("my-custom-deployment".to_string()),
         };
-        assert_eq!(resolve_deployment_name(&model, Some(&opts)), "my-custom-deployment");
+        assert_eq!(
+            resolve_deployment_name(&model, Some(&opts)),
+            "my-custom-deployment"
+        );
     }
 
     #[test]
