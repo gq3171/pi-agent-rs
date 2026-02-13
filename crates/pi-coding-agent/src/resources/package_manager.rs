@@ -317,21 +317,23 @@ fn parse_npm_package_name(spec: &str) -> String {
 }
 
 fn parse_git_clone_source(source: &str) -> Result<(String, Option<String>), CodingAgentError> {
-    let raw = source
-        .trim()
+    let trimmed = source.trim();
+    let has_git_prefix = trimmed.starts_with("git:");
+    let raw = trimmed
         .strip_prefix("git:")
         .map(str::trim)
-        .unwrap_or_else(|| source.trim());
+        .unwrap_or(trimmed);
 
-    if let Some((host, path_ref)) = raw
-        .strip_prefix("git@")
-        .and_then(|rest| rest.split_once(':'))
+    if has_git_prefix
+        && let Some((host, path_ref)) = raw
+            .strip_prefix("git@")
+            .and_then(|rest| rest.split_once(':'))
     {
         let (repo_path, reference) = split_git_repo_and_ref(path_ref);
         return Ok((format!("git@{host}:{repo_path}"), reference));
     }
 
-    // https://host/path@ref, ssh://host/path@ref, host/path@ref
+    // protocol URLs: https://host/path@ref, ssh://host/path@ref, git://host/path@ref
     if let Some((prefix, tail)) = raw.split_once("://")
         && let Some((host, path_ref)) = tail.split_once('/')
     {
@@ -339,7 +341,8 @@ fn parse_git_clone_source(source: &str) -> Result<(String, Option<String>), Codi
         return Ok((format!("{prefix}://{host}/{repo_path}"), reference));
     }
 
-    if let Some((host, path_ref)) = raw.split_once('/') {
+    // host/path shorthand is accepted only with git: prefix
+    if has_git_prefix && let Some((host, path_ref)) = raw.split_once('/') {
         let (repo_path, reference) = split_git_repo_and_ref(path_ref);
         let clone = if host.contains('.') || host.eq_ignore_ascii_case("localhost") {
             format!("https://{host}/{repo_path}")
@@ -445,7 +448,7 @@ fn sanitize_arg_for_log(arg: &str) -> String {
             let key_len = marker.len();
             let value_start = pos + key_len;
             let value_end = value[value_start..]
-                .find(|ch: char| ch == '&' || ch == ';' || ch == ' ')
+                .find(['&', ';', ' '])
                 .map(|idx| value_start + idx)
                 .unwrap_or(value.len());
             value.replace_range(value_start..value_end, "***");
@@ -517,7 +520,7 @@ mod tests {
     #[test]
     fn test_parse_source_git() {
         let cwd = tempfile::tempdir().unwrap();
-        let parsed = parse_source(cwd.path(), "git@github.com:foo/bar@main").unwrap();
+        let parsed = parse_source(cwd.path(), "git:git@github.com:foo/bar@main").unwrap();
         match parsed {
             ParsedSource::Git {
                 clone_url,
@@ -528,6 +531,16 @@ mod tests {
                 assert_eq!(reference.as_deref(), Some("main"));
             }
             _ => panic!("expected git source"),
+        }
+    }
+
+    #[test]
+    fn test_parse_source_git_without_prefix_is_local() {
+        let cwd = tempfile::tempdir().unwrap();
+        let parsed = parse_source(cwd.path(), "git@github.com:foo/bar@main").unwrap();
+        match parsed {
+            ParsedSource::Local { .. } => {}
+            _ => panic!("expected local source"),
         }
     }
 

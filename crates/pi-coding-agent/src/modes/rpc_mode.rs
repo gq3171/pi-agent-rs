@@ -66,9 +66,9 @@ pub async fn run_rpc_mode(session: &mut AgentSession) -> Result<(), CodingAgentE
     }));
 
     let stdin = io::stdin();
-    let mut lines = stdin.lock().lines();
+    let lines = stdin.lock().lines();
 
-    while let Some(line) = lines.next() {
+    for line in lines {
         let line = match line {
             Ok(l) => l,
             Err(e) => {

@@ -9,6 +9,7 @@ use pi_agent_core::event_stream::{
 };
 use pi_agent_core::types::*;
 
+use super::github_copilot_headers::{build_copilot_dynamic_headers, has_copilot_vision_input};
 use crate::env_keys::get_env_api_key;
 use crate::models::supports_xhigh;
 use crate::registry::ApiProvider;
@@ -117,33 +118,9 @@ fn build_headers(
 
     // GitHub Copilot specific headers
     if model.provider == "github-copilot" {
-        let messages = &context.messages;
-        let last_msg = messages.last();
-        let is_agent_call = last_msg.map(|m| m.role() != "user").unwrap_or(false);
-        headers.insert(
-            "X-Initiator".to_string(),
-            if is_agent_call { "agent" } else { "user" }.to_string(),
-        );
-        headers.insert(
-            "Openai-Intent".to_string(),
-            "conversation-edits".to_string(),
-        );
-
-        // Copilot requires this header when sending images
-        let has_images = messages.iter().any(|msg| match msg {
-            Message::User(u) => {
-                if let UserContent::Blocks(blocks) = &u.content {
-                    blocks.iter().any(|c| c.as_image().is_some())
-                } else {
-                    false
-                }
-            }
-            Message::ToolResult(tr) => tr.content.iter().any(|c| c.as_image().is_some()),
-            _ => false,
-        });
-        if has_images {
-            headers.insert("Copilot-Vision-Request".to_string(), "true".to_string());
-        }
+        let has_images = has_copilot_vision_input(&context.messages);
+        let copilot_headers = build_copilot_dynamic_headers(&context.messages, has_images);
+        headers.extend(copilot_headers);
     }
 
     // Merge extra headers (skip sensitive auth headers)

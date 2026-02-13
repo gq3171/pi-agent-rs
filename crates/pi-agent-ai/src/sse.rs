@@ -1,7 +1,6 @@
 /// Server-Sent Events (SSE) parser.
 ///
 /// Parses `event: xxx\ndata: yyy\n\n` format from streaming HTTP responses.
-
 /// Maximum buffer size (4 MB) to prevent unbounded memory growth from
 /// malformed/malicious streams that never send newlines.
 const MAX_BUFFER_SIZE: usize = 4 * 1024 * 1024;
@@ -38,40 +37,35 @@ impl SseParser {
             self.current_data.clear();
             self.current_event_type.clear();
             return Err(format!(
-                "SSE buffer exceeded maximum size of {} bytes",
-                MAX_BUFFER_SIZE
+                "SSE buffer exceeded maximum size of {MAX_BUFFER_SIZE} bytes"
             ));
         }
 
         let mut events = Vec::new();
 
-        loop {
-            if let Some(newline_pos) = self.buffer.find('\n') {
-                let line = self.buffer[..newline_pos].to_string();
-                self.buffer = self.buffer[newline_pos + 1..].to_string();
+        while let Some(newline_pos) = self.buffer.find('\n') {
+            let line = self.buffer[..newline_pos].to_string();
+            self.buffer = self.buffer[newline_pos + 1..].to_string();
 
-                let line = line.trim_end_matches('\r');
+            let line = line.trim_end_matches('\r');
 
-                if line.is_empty() {
-                    // Empty line = end of event
-                    if let Some(event) = self.flush_current() {
-                        events.push(event);
-                    }
-                } else if let Some(value) = line.strip_prefix("event:") {
-                    self.current_event_type = value.trim().to_string();
-                } else if let Some(value) = line.strip_prefix("data:") {
-                    self.current_data.push(value.trim().to_string());
-                } else if line.starts_with(':') {
-                    // Comment, ignore
-                } else if let Some(value) = line.strip_prefix("id:") {
-                    // Event ID, currently not used
-                    let _ = value;
-                } else if let Some(value) = line.strip_prefix("retry:") {
-                    // Retry interval, currently not used
-                    let _ = value;
+            if line.is_empty() {
+                // Empty line = end of event
+                if let Some(event) = self.flush_current() {
+                    events.push(event);
                 }
-            } else {
-                break;
+            } else if let Some(value) = line.strip_prefix("event:") {
+                self.current_event_type = value.trim().to_string();
+            } else if let Some(value) = line.strip_prefix("data:") {
+                self.current_data.push(value.trim().to_string());
+            } else if line.starts_with(':') {
+                // Comment, ignore
+            } else if let Some(value) = line.strip_prefix("id:") {
+                // Event ID, currently not used
+                let _ = value;
+            } else if let Some(value) = line.strip_prefix("retry:") {
+                // Retry interval, currently not used
+                let _ = value;
             }
         }
 

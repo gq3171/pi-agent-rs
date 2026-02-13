@@ -332,8 +332,7 @@ impl DefaultResourceLoader {
                 self.diagnostics.push(ResourceDiagnostic {
                     diagnostic_type: ResourceDiagnosticType::Warning,
                     message: format!(
-                        "Duplicate {resource_kind} '{}' ignored (winner: {}, loser: {})",
-                        name, existing, source
+                        "Duplicate {resource_kind} '{name}' ignored (winner: {existing}, loser: {source})"
                     ),
                     path: Some(source),
                 });

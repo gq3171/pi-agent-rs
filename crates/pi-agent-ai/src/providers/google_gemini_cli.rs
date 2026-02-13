@@ -607,10 +607,7 @@ pub fn build_request(
     if let Some(sp) = &context.system_prompt {
         request["systemInstruction"] = json!({ "parts": [{ "text": sanitize_surrogates(sp) }] });
     }
-    if generation_config
-        .as_object()
-        .map_or(false, |o| !o.is_empty())
-    {
+    if generation_config.as_object().is_some_and(|o| !o.is_empty()) {
         request["generationConfig"] = generation_config;
     }
 
@@ -1302,7 +1299,7 @@ async fn run_stream(
             if !retry_resp.status().is_success() {
                 let s = retry_resp.status().as_u16();
                 let t = retry_resp.text().await.unwrap_or_default();
-                return Err(format!("Cloud Code Assist API error ({}): {}", s, t));
+                return Err(format!("Cloud Code Assist API error ({s}): {t}"));
             }
 
             let streamed = stream_response_owned(retry_resp, model, output, stream, cancel).await?;

@@ -51,9 +51,11 @@ fn to_base36(n: u32) -> String {
 // =============================================================================
 
 /// Options for controlling service-tier pricing adjustments.
+pub type ApplyServiceTierPricingFn = dyn Fn(&mut Usage, Option<&str>) + Send;
+
 pub struct OpenAIResponsesStreamOptions {
     pub service_tier: Option<String>,
-    pub apply_service_tier_pricing: Option<Box<dyn Fn(&mut Usage, Option<&str>) + Send>>,
+    pub apply_service_tier_pricing: Option<Box<ApplyServiceTierPricingFn>>,
 }
 
 /// Options for convert_responses_messages.
@@ -246,7 +248,7 @@ pub fn convert_responses_messages(
                             {
                                 Value::Null
                             } else {
-                                item_id_raw.map(|s| Value::String(s)).unwrap_or(Value::Null)
+                                item_id_raw.map(Value::String).unwrap_or(Value::Null)
                             };
 
                             output.push(json!({
@@ -709,81 +711,76 @@ pub fn process_responses_events(
 
                 match item_type {
                     "reasoning" => {
-                        if let Some(cb) = current_block.as_mut() {
-                            if let CurrentBlock::Thinking { .. } = cb {
-                                // Update thinking from full summary
-                                let summary_text = item
-                                    .get("summary")
-                                    .and_then(|v| v.as_array())
-                                    .map(|arr| {
-                                        arr.iter()
-                                            .filter_map(|s| s.get("text").and_then(|t| t.as_str()))
-                                            .collect::<Vec<_>>()
-                                            .join("\n\n")
-                                    })
-                                    .unwrap_or_default();
+                        if let Some(CurrentBlock::Thinking { .. }) = current_block.as_mut() {
+                            // Update thinking from full summary
+                            let summary_text = item
+                                .get("summary")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|s| s.get("text").and_then(|t| t.as_str()))
+                                        .collect::<Vec<_>>()
+                                        .join("\n\n")
+                                })
+                                .unwrap_or_default();
 
-                                if let Some(ContentBlock::Thinking(t)) =
-                                    output.content.get_mut(block_index)
-                                {
-                                    t.thinking = summary_text.clone();
-                                    t.thinking_signature =
-                                        Some(serde_json::to_string(&item).unwrap_or_default());
-                                }
-                                stream.push(AssistantMessageEvent::ThinkingEnd {
-                                    content_index: block_index,
-                                    content: summary_text,
-                                    partial: output.clone(),
-                                });
-                                *current_block = None;
+                            if let Some(ContentBlock::Thinking(t)) =
+                                output.content.get_mut(block_index)
+                            {
+                                t.thinking = summary_text.clone();
+                                t.thinking_signature =
+                                    Some(serde_json::to_string(&item).unwrap_or_default());
                             }
+                            stream.push(AssistantMessageEvent::ThinkingEnd {
+                                content_index: block_index,
+                                content: summary_text,
+                                partial: output.clone(),
+                            });
+                            *current_block = None;
                         }
                     }
                     "message" => {
-                        if let Some(cb) = current_block.as_mut() {
-                            if let CurrentBlock::Text { .. } = cb {
-                                let final_text = item
-                                    .get("content")
-                                    .and_then(|v| v.as_array())
-                                    .map(|arr| {
-                                        arr.iter()
-                                            .filter_map(|c| {
-                                                let ct = c
-                                                    .get("type")
-                                                    .and_then(|t| t.as_str())
-                                                    .unwrap_or("");
-                                                match ct {
-                                                    "output_text" => {
-                                                        c.get("text").and_then(|t| t.as_str())
-                                                    }
-                                                    "refusal" => {
-                                                        c.get("refusal").and_then(|t| t.as_str())
-                                                    }
-                                                    _ => None,
+                        if let Some(CurrentBlock::Text { .. }) = current_block.as_mut() {
+                            let final_text = item
+                                .get("content")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| {
+                                    arr.iter()
+                                        .filter_map(|c| {
+                                            let ct = c
+                                                .get("type")
+                                                .and_then(|t| t.as_str())
+                                                .unwrap_or("");
+                                            match ct {
+                                                "output_text" => {
+                                                    c.get("text").and_then(|t| t.as_str())
                                                 }
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("")
-                                    })
-                                    .unwrap_or_default();
-                                let item_id = item
-                                    .get("id")
-                                    .and_then(|v| v.as_str())
-                                    .map(|s| s.to_string());
+                                                "refusal" => {
+                                                    c.get("refusal").and_then(|t| t.as_str())
+                                                }
+                                                _ => None,
+                                            }
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join("")
+                                })
+                                .unwrap_or_default();
+                            let item_id = item
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string());
 
-                                if let Some(ContentBlock::Text(t)) =
-                                    output.content.get_mut(block_index)
-                                {
-                                    t.text = final_text.clone();
-                                    t.text_signature = item_id;
-                                }
-                                stream.push(AssistantMessageEvent::TextEnd {
-                                    content_index: block_index,
-                                    content: final_text,
-                                    partial: output.clone(),
-                                });
-                                *current_block = None;
+                            if let Some(ContentBlock::Text(t)) = output.content.get_mut(block_index)
+                            {
+                                t.text = final_text.clone();
+                                t.text_signature = item_id;
                             }
+                            stream.push(AssistantMessageEvent::TextEnd {
+                                content_index: block_index,
+                                content: final_text,
+                                partial: output.clone(),
+                            });
+                            *current_block = None;
                         }
                     }
                     "function_call" => {

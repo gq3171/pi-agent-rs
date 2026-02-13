@@ -634,7 +634,9 @@ fn build_additional_model_request_fields(model: &Model, options: &BedrockOptions
 ///
 /// Returns a list of (headers, payload) tuples parsed from the buffer,
 /// and the number of bytes consumed.
-fn decode_event_stream_messages(buf: &[u8]) -> (Vec<(HashMap<String, String>, Vec<u8>)>, usize) {
+type DecodedEventStreamMessage = (HashMap<String, String>, Vec<u8>);
+
+fn decode_event_stream_messages(buf: &[u8]) -> (Vec<DecodedEventStreamMessage>, usize) {
     let mut results = Vec::new();
     let mut offset = 0;
 
@@ -947,7 +949,7 @@ fn handle_content_block_delta(
 
 fn handle_content_block_stop(
     event: &Value,
-    blocks: &mut Vec<StreamBlock>,
+    blocks: &mut [StreamBlock],
     output: &mut AssistantMessage,
     stream: &AssistantMessageEventStream,
 ) {
@@ -1102,10 +1104,7 @@ pub fn stream_bedrock(
         if let Some(temp) = options.base.temperature {
             inference_config["temperature"] = json!(temp);
         }
-        if inference_config
-            .as_object()
-            .map_or(false, |o| !o.is_empty())
-        {
+        if inference_config.as_object().is_some_and(|o| !o.is_empty()) {
             body["inferenceConfig"] = inference_config;
         }
 

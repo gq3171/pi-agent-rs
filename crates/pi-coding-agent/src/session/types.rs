@@ -50,7 +50,7 @@ where
     }
 }
 
-fn serialize_timestamp_string<S>(value: &String, serializer: S) -> Result<S::Ok, S::Error>
+fn serialize_timestamp_string<S>(value: &str, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {

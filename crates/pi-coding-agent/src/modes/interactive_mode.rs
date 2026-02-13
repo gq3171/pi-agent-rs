@@ -221,12 +221,10 @@ impl InteractiveMode {
                                         let model_id = model.id.clone();
                                         session.set_model(model);
                                         println!("已切换模型: {provider}/{model_id}");
+                                    } else if self.options.scoped_models.is_empty() {
+                                        println!("未找到模型: {query}");
                                     } else {
-                                        if self.options.scoped_models.is_empty() {
-                                            println!("未找到模型: {query}");
-                                        } else {
-                                            println!("未找到模型（当前 scope 内）: {query}");
-                                        }
+                                        println!("未找到模型（当前 scope 内）: {query}");
                                     }
                                 }
                             }

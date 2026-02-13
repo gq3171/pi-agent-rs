@@ -1,6 +1,4 @@
 use std::collections::HashSet;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -10,51 +8,18 @@ use crate::agent_loop::{agent_loop, agent_loop_continue};
 use crate::agent_types::*;
 use crate::types::*;
 
+#[derive(Default)]
 pub struct AgentOptions {
     pub initial_state: Option<PartialAgentState>,
-    pub convert_to_llm: Option<
-        Arc<
-            dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
-    pub transform_context: Option<
-        Arc<
-            dyn Fn(
-                    Vec<AgentMessage>,
-                    CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
+    pub convert_to_llm: Option<Arc<ConvertToLlmFn>>,
+    pub transform_context: Option<Arc<TransformContextFn>>,
     pub steering_mode: Option<QueueMode>,
     pub follow_up_mode: Option<QueueMode>,
     pub stream_fn: Option<StreamFnBox>,
     pub session_id: Option<String>,
-    pub get_api_key: Option<
-        Arc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>,
-    >,
+    pub get_api_key: Option<Arc<GetApiKeyFn>>,
     pub thinking_budgets: Option<ThinkingBudgets>,
     pub max_retry_delay_ms: Option<u64>,
-}
-
-impl Default for AgentOptions {
-    fn default() -> Self {
-        Self {
-            initial_state: None,
-            convert_to_llm: None,
-            transform_context: None,
-            steering_mode: None,
-            follow_up_mode: None,
-            stream_fn: None,
-            session_id: None,
-            get_api_key: None,
-            thinking_budgets: None,
-            max_retry_delay_ms: None,
-        }
-    }
 }
 
 pub struct PartialAgentState {
@@ -66,9 +31,7 @@ pub struct PartialAgentState {
 }
 
 /// Default convertToLlm: keep only LLM-compatible messages
-fn default_convert_to_llm(
-    messages: &[AgentMessage],
-) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> {
+fn default_convert_to_llm(messages: &[AgentMessage]) -> ConvertToLlmFuture {
     let result: Vec<Message> = messages
         .iter()
         .filter_map(|m| m.as_message().cloned())
@@ -78,30 +41,17 @@ fn default_convert_to_llm(
 
 pub struct Agent {
     state: AgentState,
-    listeners: Vec<Box<dyn Fn(&AgentEvent) + Send + Sync>>,
+    listeners: Vec<Box<AgentEventListener>>,
     cancel_token: Option<CancellationToken>,
-    convert_to_llm: Arc<
-        dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync,
-    >,
-    transform_context: Option<
-        Arc<
-            dyn Fn(
-                    Vec<AgentMessage>,
-                    CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
+    convert_to_llm: Arc<ConvertToLlmFn>,
+    transform_context: Option<Arc<TransformContextFn>>,
     steering_queue: Vec<AgentMessage>,
     follow_up_queue: Vec<AgentMessage>,
     steering_mode: QueueMode,
     follow_up_mode: QueueMode,
     stream_fn: Option<StreamFnBox>,
     session_id: Option<String>,
-    get_api_key: Option<
-        Arc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>,
-    >,
+    get_api_key: Option<Arc<GetApiKeyFn>>,
     thinking_budgets: Option<ThinkingBudgets>,
     max_retry_delay_ms: Option<u64>,
     running_watch: tokio::sync::watch::Sender<bool>,
@@ -189,7 +139,7 @@ impl Agent {
         &self.state
     }
 
-    pub fn subscribe(&mut self, listener: Box<dyn Fn(&AgentEvent) + Send + Sync>) -> usize {
+    pub fn subscribe(&mut self, listener: Box<AgentEventListener>) -> usize {
         self.listeners.push(listener);
         self.listeners.len() - 1
     }
@@ -442,9 +392,7 @@ impl Agent {
 
         let steering_queue_clone = steering_queue.clone();
         let skip_flag_clone = skip_flag.clone();
-        let get_steering: Arc<
-            dyn Fn() -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync,
-        > = Arc::new(move || {
+        let get_steering: Arc<MessageQueueFn> = Arc::new(move || {
             let sq = steering_queue_clone.clone();
             let sf = skip_flag_clone.clone();
             let mode = steering_mode.clone();
@@ -475,9 +423,7 @@ impl Agent {
         });
 
         let follow_up_queue_clone = follow_up_queue.clone();
-        let get_follow_up: Arc<
-            dyn Fn() -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync,
-        > = Arc::new(move || {
+        let get_follow_up: Arc<MessageQueueFn> = Arc::new(move || {
             let fq = follow_up_queue_clone.clone();
             let mode = follow_up_mode.clone();
             Box::pin(async move {
@@ -527,10 +473,12 @@ impl Agent {
                     self.stream_fn.clone(),
                 ))
             } else {
-                Box::pin(
-                    agent_loop_continue(context, config, cancel.clone(), self.stream_fn.clone())
-                        .map_err(|e| e)?,
-                )
+                Box::pin(agent_loop_continue(
+                    context,
+                    config,
+                    cancel.clone(),
+                    self.stream_fn.clone(),
+                )?)
             };
 
             while let Some(event) = event_stream.next().await {

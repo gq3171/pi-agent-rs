@@ -205,7 +205,6 @@ pub fn create_agent_session(
                     .clone()
             }),
             package_sources: session.settings_manager().settings().packages.clone(),
-            ..Default::default()
         });
 
         if let Err(e) = resource_loader.reload() {

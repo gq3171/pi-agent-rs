@@ -12,6 +12,7 @@ use pi_agent_core::sanitize::sanitize_surrogates;
 use pi_agent_core::transform::transform_messages;
 use pi_agent_core::types::*;
 
+use super::github_copilot_headers::{build_copilot_dynamic_headers, has_copilot_vision_input};
 use crate::env_keys::get_env_api_key;
 use crate::models::calculate_cost;
 use crate::registry::ApiProvider;
@@ -535,13 +536,9 @@ fn build_headers(
     api_key: &str,
     is_oauth: bool,
     interleaved_thinking: bool,
+    dynamic_headers: Option<&HashMap<String, String>>,
     extra_headers: Option<&HashMap<String, String>>,
 ) -> HashMap<String, String> {
-    let mut beta_features = vec!["fine-grained-tool-streaming-2025-05-14".to_string()];
-    if interleaved_thinking {
-        beta_features.push("interleaved-thinking-2025-05-14".to_string());
-    }
-
     let mut headers = HashMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
     headers.insert("accept".to_string(), "application/json".to_string());
@@ -549,6 +546,34 @@ fn build_headers(
         "anthropic-dangerous-direct-browser-access".to_string(),
         "true".to_string(),
     );
+
+    // Copilot Claude: Bearer auth + selective betas (no fine-grained-tool-streaming).
+    if model.provider == "github-copilot" {
+        let mut beta_features = Vec::new();
+        if interleaved_thinking {
+            beta_features.push("interleaved-thinking-2025-05-14".to_string());
+        }
+        if !beta_features.is_empty() {
+            headers.insert("anthropic-beta".to_string(), beta_features.join(","));
+        }
+        headers.insert("authorization".to_string(), format!("Bearer {api_key}"));
+
+        if let Some(model_headers) = &model.headers {
+            crate::header_utils::merge_headers_safe(&mut headers, model_headers);
+        }
+        if let Some(dynamic) = dynamic_headers {
+            crate::header_utils::merge_headers_safe(&mut headers, dynamic);
+        }
+        if let Some(extra) = extra_headers {
+            crate::header_utils::merge_headers_safe(&mut headers, extra);
+        }
+        return headers;
+    }
+
+    let mut beta_features = vec!["fine-grained-tool-streaming-2025-05-14".to_string()];
+    if interleaved_thinking {
+        beta_features.push("interleaved-thinking-2025-05-14".to_string());
+    }
 
     if is_oauth {
         headers.insert(
@@ -610,11 +635,18 @@ pub fn stream_anthropic(
 
         let is_oauth = is_oauth_token(&api_key);
         let interleaved = options.interleaved_thinking;
+        let copilot_dynamic_headers = if model.provider == "github-copilot" {
+            let has_images = has_copilot_vision_input(&context.messages);
+            Some(build_copilot_dynamic_headers(&context.messages, has_images))
+        } else {
+            None
+        };
         let headers = build_headers(
             &model,
             &api_key,
             is_oauth,
             interleaved,
+            copilot_dynamic_headers.as_ref(),
             options.base.headers.as_ref(),
         );
 

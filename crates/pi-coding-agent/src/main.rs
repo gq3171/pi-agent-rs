@@ -12,6 +12,7 @@ use pi_coding_agent::cli::args::{Args, Mode, is_valid_thinking_level, parse_args
 use pi_coding_agent::config::paths::{self, APP_NAME, CONFIG_DIR_NAME};
 use pi_coding_agent::export_html::{ExportHtmlOptions, export_session_to_html};
 use pi_coding_agent::model::registry::ModelRegistry;
+use pi_coding_agent::model::resolver::{parse_model_pattern, resolve_cli_model};
 use pi_coding_agent::modes::{
     InteractiveMode, InteractiveModeOptions, PrintModeOptions, PrintOutputMode, ScopedModelConfig,
     run_print_mode, run_rpc_mode,
@@ -69,9 +70,7 @@ impl PackageScope {
 }
 
 fn parse_package_command(args: &[String]) -> Option<PackageCommandOptions> {
-    let Some(command_raw) = args.first() else {
-        return None;
-    };
+    let command_raw = args.first()?;
 
     let command = match command_raw.as_str() {
         "install" => PackageCommand::Install,
@@ -382,7 +381,7 @@ fn collect_package_extension_manifest_paths(package_root: &Path) -> Vec<PathBuf>
         }
     }
 
-    result.sort_by(|a, b| to_posix_string(a).cmp(&to_posix_string(b)));
+    result.sort_by_key(|a| to_posix_string(a));
     result
 }
 
@@ -403,7 +402,7 @@ fn collect_directory_files_with_extension(dir: &Path, extension: &str) -> Vec<Pa
                     .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
         })
         .collect::<Vec<_>>();
-    files.sort_by(|a, b| to_posix_string(a).cmp(&to_posix_string(b)));
+    files.sort_by_key(|a| to_posix_string(a));
     files
 }
 
@@ -443,7 +442,7 @@ fn build_config_resource_items(
             .iter()
             .map(|path| to_posix_string(path))
             .collect::<std::collections::HashSet<_>>(),
-        Some(patterns) if patterns.is_empty() => std::collections::HashSet::new(),
+        Some([]) => std::collections::HashSet::new(),
         Some(patterns) => apply_patterns(&all_paths, patterns, package_root),
     };
 
@@ -476,7 +475,7 @@ fn toggle_package_resource(
         .iter()
         .position(|pkg| source_match_key_for_scope(scope_dir, pkg.source()) == input_key)
     else {
-        return Err(format!("Package '{}' 当前未启用。", source));
+        return Err(format!("Package '{source}' 当前未启用。"));
     };
 
     let mut filter = match &package_sources[index] {
@@ -513,7 +512,7 @@ fn toggle_package_resource_item(
         .iter()
         .position(|pkg| source_match_key_for_scope(scope_dir, pkg.source()) == input_key)
     else {
-        return Err(format!("Package '{}' 当前未启用。", source));
+        return Err(format!("Package '{source}' 当前未启用。"));
     };
 
     let mut filter = match &package_sources[index] {
@@ -776,7 +775,7 @@ fn run_config_command(cwd: &Path, base_dir: &Path) -> Result<i32, String> {
                     continue;
                 };
                 if !package_enabled(package_sources, scope_dir, cwd, source) {
-                    println!("请先启用该 package（先输入编号 {}）", index);
+                    println!("请先启用该 package（先输入编号 {index}）");
                     continue;
                 }
                 match toggle_package_resource(
@@ -811,7 +810,7 @@ fn run_config_command(cwd: &Path, base_dir: &Path) -> Result<i32, String> {
                     continue;
                 }
                 if !package_enabled(package_sources, scope_dir, cwd, source) {
-                    println!("请先启用该 package（先输入编号 {}）", index);
+                    println!("请先启用该 package（先输入编号 {index}）");
                     continue;
                 }
 
@@ -1123,7 +1122,7 @@ fn prepare_initial_message(file_args: &[String], messages: &mut Vec<String>) -> 
                 file_text.push_str(&format!("File: {}\n{}\n\n", path.display(), content));
             }
             Err(e) => {
-                eprintln!("Warning: 无法读取 @{}: {}", file_arg, e);
+                eprintln!("Warning: 无法读取 @{file_arg}: {e}");
             }
         }
     }
@@ -1145,20 +1144,10 @@ fn contains_glob_pattern(pattern: &str) -> bool {
 }
 
 fn wildcard_match_case_insensitive(pattern: &str, target: &str) -> bool {
-    let mut regex_pattern = String::with_capacity(pattern.len() * 2 + 2);
-    regex_pattern.push('^');
-    for ch in pattern.chars() {
-        match ch {
-            '*' => regex_pattern.push_str(".*"),
-            '?' => regex_pattern.push('.'),
-            _ => regex_pattern.push_str(&regex::escape(&ch.to_string())),
-        }
-    }
-    regex_pattern.push('$');
-    regex::RegexBuilder::new(&regex_pattern)
-        .case_insensitive(true)
-        .build()
-        .map(|regex| regex.is_match(target))
+    let pattern_lc = pattern.to_lowercase();
+    let target_lc = target.to_lowercase();
+    glob::Pattern::new(&pattern_lc)
+        .map(|glob_pattern| glob_pattern.matches(&target_lc))
         .unwrap_or(false)
 }
 
@@ -1201,32 +1190,20 @@ fn resolve_scoped_models(registry: &ModelRegistry, patterns: &[String]) -> Vec<S
             continue;
         }
 
-        let mut candidate_pattern = pattern.as_str();
-        let mut thinking_level = None;
-
-        if registry.find(pattern).is_none()
-            && let Some((prefix, suffix)) = pattern.rsplit_once(':')
-        {
-            candidate_pattern = prefix;
-            if is_valid_thinking_level(suffix) {
-                thinking_level = Some(suffix.to_string());
-            } else if registry.find(prefix).is_some() {
-                eprintln!(
-                    "Warning: Invalid thinking level \"{}\" in pattern \"{}\"",
-                    suffix, pattern
-                );
-            }
+        let parsed = parse_model_pattern(pattern, registry.all_models(), true);
+        if let Some(warning) = parsed.warning {
+            eprintln!("Warning: {warning}");
         }
-
-        let Some(model) = registry.find(candidate_pattern).cloned() else {
+        let Some(model) = parsed.model else {
             eprintln!("Warning: No models match pattern \"{pattern}\"");
             continue;
         };
+
         let key = format!("{}/{}", model.provider, model.id);
         if seen.insert(key) {
             scoped_models.push(ScopedModelChoice {
                 model,
-                thinking_level,
+                thinking_level: parsed.thinking_level,
             });
         }
     }
@@ -1548,6 +1525,29 @@ async fn main() {
         }
     }
 
+    if args.model.is_some() {
+        let resolved = resolve_cli_model(
+            args.provider.as_deref(),
+            args.model.as_deref(),
+            session.model_registry(),
+        );
+        if let Some(warning) = resolved.warning {
+            eprintln!("Warning: {warning}");
+        }
+        if let Some(error) = resolved.error {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
+        if let Some(model) = resolved.model {
+            session.set_model(model);
+            if args.thinking.is_none() {
+                if let Some(level) = resolved.thinking_level {
+                    session.set_thinking_level_str(&level);
+                }
+            }
+        }
+    }
+
     if let Some(provider) = &args.provider {
         if args.model.is_none() {
             if let Some(model) = session
@@ -1557,7 +1557,7 @@ async fn main() {
             {
                 session.set_model((**model).clone());
             } else {
-                eprintln!("Warning: provider '{}' 未找到可用模型", provider);
+                eprintln!("Warning: provider '{provider}' 未找到可用模型");
             }
         }
     }

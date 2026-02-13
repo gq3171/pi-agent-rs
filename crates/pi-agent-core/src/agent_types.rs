@@ -159,8 +159,19 @@ pub struct AgentContext {
     pub tools: Vec<Arc<dyn AgentTool>>,
 }
 
+pub type ConvertToLlmFuture = Pin<Box<dyn Future<Output = Vec<Message>> + Send>>;
+pub type ConvertToLlmFn = dyn Fn(&[AgentMessage]) -> ConvertToLlmFuture + Send + Sync;
+pub type TransformContextFuture = Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>;
+pub type TransformContextFn =
+    dyn Fn(Vec<AgentMessage>, CancellationToken) -> TransformContextFuture + Send + Sync;
+pub type GetApiKeyFuture = Pin<Box<dyn Future<Output = Option<String>> + Send>>;
+pub type GetApiKeyFn = dyn Fn(&str) -> GetApiKeyFuture + Send + Sync;
+pub type MessageQueueFuture = Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>;
+pub type MessageQueueFn = dyn Fn() -> MessageQueueFuture + Send + Sync;
+
 // ---------- AgentEvent ----------
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
     AgentStart,
@@ -218,6 +229,8 @@ impl AgentEvent {
     }
 }
 
+pub type AgentEventListener = dyn Fn(&AgentEvent) + Send + Sync;
+
 // ---------- QueueMode ----------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -239,28 +252,11 @@ pub struct AgentLoopConfig {
     pub session_id: Option<String>,
     pub headers: Option<std::collections::HashMap<String, String>>,
     pub max_retry_delay_ms: Option<u64>,
-    pub convert_to_llm: Arc<
-        dyn Fn(&[AgentMessage]) -> Pin<Box<dyn Future<Output = Vec<Message>> + Send>> + Send + Sync,
-    >,
-    pub transform_context: Option<
-        Arc<
-            dyn Fn(
-                    Vec<AgentMessage>,
-                    CancellationToken,
-                ) -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
-    pub get_api_key: Option<
-        Arc<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync>,
-    >,
-    pub get_steering_messages: Option<
-        Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync>,
-    >,
-    pub get_follow_up_messages: Option<
-        Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Vec<AgentMessage>> + Send>> + Send + Sync>,
-    >,
+    pub convert_to_llm: Arc<ConvertToLlmFn>,
+    pub transform_context: Option<Arc<TransformContextFn>>,
+    pub get_api_key: Option<Arc<GetApiKeyFn>>,
+    pub get_steering_messages: Option<Arc<MessageQueueFn>>,
+    pub get_follow_up_messages: Option<Arc<MessageQueueFn>>,
 }
 
 // ---------- StreamFn type ----------

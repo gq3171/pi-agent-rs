@@ -98,16 +98,17 @@ fn parse_npm_name(source: &str) -> Option<String> {
 }
 
 fn parse_git_source(source: &str) -> Option<(String, String)> {
-    let raw = source
-        .trim()
+    let trimmed = source.trim();
+    let has_git_prefix = trimmed.starts_with("git:");
+    let raw = trimmed
         .strip_prefix("git:")
         .map(str::trim)
-        .unwrap_or_else(|| source.trim());
+        .unwrap_or(trimmed);
     if raw.is_empty() {
         return None;
     }
 
-    if let Some(captures) = SCP_GIT_RE.captures(raw) {
+    if has_git_prefix && let Some(captures) = SCP_GIT_RE.captures(raw) {
         let host = captures.get(1).map(|m| m.as_str().to_ascii_lowercase())?;
         let path_with_ref = captures.get(2).map(|m| m.as_str())?;
         let path = normalize_git_path(strip_git_ref_suffix(path_with_ref))?;
@@ -115,12 +116,9 @@ fn parse_git_source(source: &str) -> Option<(String, String)> {
     }
 
     if SCHEME_RE.is_match(raw)
-        && let Some((authority, path_with_ref)) = raw.split_once("://").and_then(|(_, rest)| {
-            let mut parts = rest.splitn(2, '/');
-            let authority = parts.next()?;
-            let path = parts.next()?;
-            Some((authority, path))
-        })
+        && let Some((authority, path_with_ref)) = raw
+            .split_once("://")
+            .and_then(|(_, rest)| rest.split_once('/'))
     {
         let host_with_port = authority.rsplit('@').next().unwrap_or(authority);
         let host = host_with_port
@@ -135,14 +133,15 @@ fn parse_git_source(source: &str) -> Option<(String, String)> {
         return Some((host, path));
     }
 
-    if let Some((host, path_with_ref)) = raw.split_once('/') {
-        if host.contains('.') || host.eq_ignore_ascii_case("localhost") {
-            let path = normalize_git_path(strip_git_ref_suffix(path_with_ref))?;
-            return Some((host.to_ascii_lowercase(), path));
-        }
+    if has_git_prefix
+        && let Some((host, path_with_ref)) = raw.split_once('/')
+        && (host.contains('.') || host.eq_ignore_ascii_case("localhost"))
+    {
+        let path = normalize_git_path(strip_git_ref_suffix(path_with_ref))?;
+        return Some((host.to_ascii_lowercase(), path));
     }
 
-    if GITHUB_SHORTHAND_RE.is_match(raw) {
+    if has_git_prefix && GITHUB_SHORTHAND_RE.is_match(raw) {
         let path = normalize_git_path(strip_git_ref_suffix(raw))?;
         return Some(("github.com".to_string(), path));
     }
@@ -256,12 +255,19 @@ mod tests {
     fn test_git_identity_normalizes_transport() {
         let cwd = tempfile::tempdir().unwrap();
         let https = source_match_key_for_input(cwd.path(), "https://github.com/foo/bar.git");
-        let ssh = source_match_key_for_input(cwd.path(), "git@github.com:foo/bar");
+        let ssh = source_match_key_for_input(cwd.path(), "git:git@github.com:foo/bar");
         let prefixed = source_match_key_for_input(cwd.path(), "git:github.com/foo/bar@main");
         let with_hash = source_match_key_for_input(cwd.path(), "https://github.com/foo/bar#dev");
         assert_eq!(https, ssh);
         assert_eq!(ssh, prefixed);
         assert_eq!(prefixed, with_hash);
+    }
+
+    #[test]
+    fn test_host_path_without_git_prefix_is_local() {
+        let cwd = tempfile::tempdir().unwrap();
+        let key = source_match_key_for_input(cwd.path(), "github.com/foo/bar");
+        assert!(key.starts_with("local:"));
     }
 
     #[test]

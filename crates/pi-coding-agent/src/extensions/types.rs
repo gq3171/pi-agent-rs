@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use pi_agent_core::agent_types::{AgentMessage, AgentToolResult};
+use pi_agent_core::types::AssistantMessageEvent;
 
 /// Defines a tool that can be provided by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,12 +68,22 @@ pub trait ExtensionAPI: Send + Sync {
 }
 
 /// Events that extensions can receive.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum ContextEvent {
     /// A new turn started.
     TurnStart,
     /// A turn ended.
     TurnEnd,
+    /// A message started (user/assistant/tool result).
+    MessageStart { message: AgentMessage },
+    /// An assistant stream update was received.
+    MessageUpdate {
+        message: AgentMessage,
+        assistant_message_event: AssistantMessageEvent,
+    },
+    /// A message ended.
+    MessageEnd { message: AgentMessage },
     /// A file was read.
     FileRead { path: String },
     /// A file was written.
@@ -94,6 +105,26 @@ pub enum ContextEvent {
     ToolResult {
         tool_name: String,
         tool_call_id: String,
+        is_error: bool,
+    },
+    /// A tool execution started.
+    ToolExecutionStart {
+        tool_call_id: String,
+        tool_name: String,
+        args: Value,
+    },
+    /// A tool execution produced a partial result.
+    ToolExecutionUpdate {
+        tool_call_id: String,
+        tool_name: String,
+        args: Value,
+        partial_result: AgentToolResult,
+    },
+    /// A tool execution ended.
+    ToolExecutionEnd {
+        tool_call_id: String,
+        tool_name: String,
+        result: AgentToolResult,
         is_error: bool,
     },
 }

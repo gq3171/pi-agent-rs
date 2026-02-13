@@ -257,8 +257,7 @@ impl AgentTool for GrepTool {
                     let start = idx.saturating_sub(context);
                     let end = (idx + context).min(lines.len().saturating_sub(1));
 
-                    for i in start..=end {
-                        let text = lines[i];
+                    for (i, text) in lines.iter().enumerate().take(end + 1).skip(start) {
                         let truncated_text = if text.chars().count() > GREP_MAX_LINE_CHARS {
                             lines_truncated = true;
                             let mut s = text.chars().take(GREP_MAX_LINE_CHARS).collect::<String>();

@@ -70,7 +70,7 @@ pub fn agent_loop_continue(
 
     if let Some(last) = context.messages.last() {
         if last.role() == Some("assistant") {
-            return Err(format!("Cannot continue from message role: assistant"));
+            return Err("Cannot continue from message role: assistant".to_string());
         }
     }
 
@@ -440,14 +440,7 @@ async fn execute_tool_calls(
     assistant_message: &AssistantMessage,
     cancel: CancellationToken,
     stream: &EventStream<AgentEvent, Vec<AgentMessage>>,
-    get_steering_messages: Option<
-        &Arc<
-            dyn Fn()
-                    -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<AgentMessage>> + Send>>
-                + Send
-                + Sync,
-        >,
-    >,
+    get_steering_messages: Option<&Arc<MessageQueueFn>>,
 ) -> ToolExecutionResult {
     let tool_calls: Vec<&ToolCall> = assistant_message
         .content

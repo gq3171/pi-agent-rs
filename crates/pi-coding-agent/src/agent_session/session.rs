@@ -7,7 +7,7 @@ use futures::StreamExt;
 use tokio_util::sync::CancellationToken;
 
 use pi_agent_core::agent_types::{
-    AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, StreamFnBox,
+    AgentContext, AgentEvent, AgentLoopConfig, AgentMessage, AgentTool, GetApiKeyFn, StreamFnBox,
 };
 use pi_agent_core::types::{Message, Model, StopReason, ThinkingLevel};
 
@@ -328,9 +328,7 @@ impl AgentSession {
         // Wire auth_storage into the get_api_key closure so saved/runtime
         // credentials flow through to provider requests.
         let auth = self.auth_storage.clone();
-        let get_api_key_fn: Arc<
-            dyn Fn(&str) -> Pin<Box<dyn Future<Output = Option<String>> + Send>> + Send + Sync,
-        > = Arc::new(move |provider: &str| {
+        let get_api_key_fn: Arc<GetApiKeyFn> = Arc::new(move |provider: &str| {
             let auth = auth.clone();
             let provider = provider.to_string();
             Box::pin(async move { auth.get_api_key(&provider) })
@@ -383,8 +381,8 @@ impl AgentSession {
             while let Some(event) = pinned.next().await {
                 // Persist assistant entries on message end
                 if let AgentEvent::MessageEnd {
-                    message: AgentMessage::Llm(Message::Assistant(ref assistant_msg)),
-                } = event
+                    message: AgentMessage::Llm(Message::Assistant(assistant_msg)),
+                } = &event
                 {
                     if let Some(session_id) = &self.session_id {
                         let message_value = match serde_json::to_value(assistant_msg) {
@@ -406,6 +404,61 @@ impl AgentSession {
                         if let Err(e) = self.session_manager.append_entry(session_id, &entry) {
                             tracing::warn!("Failed to persist assistant entry: {e}");
                         }
+                    }
+                }
+
+                if let Some(runner) = &self.extension_runner {
+                    let extension_event = match &event {
+                        AgentEvent::MessageStart { message } => Some(ContextEvent::MessageStart {
+                            message: message.clone(),
+                        }),
+                        AgentEvent::MessageUpdate {
+                            message,
+                            assistant_message_event,
+                        } => Some(ContextEvent::MessageUpdate {
+                            message: message.clone(),
+                            assistant_message_event: assistant_message_event.clone(),
+                        }),
+                        AgentEvent::MessageEnd { message } => Some(ContextEvent::MessageEnd {
+                            message: message.clone(),
+                        }),
+                        AgentEvent::ToolExecutionStart {
+                            tool_call_id,
+                            tool_name,
+                            args,
+                        } => Some(ContextEvent::ToolExecutionStart {
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: tool_name.clone(),
+                            args: args.clone(),
+                        }),
+                        AgentEvent::ToolExecutionUpdate {
+                            tool_call_id,
+                            tool_name,
+                            args,
+                            partial_result,
+                        } => Some(ContextEvent::ToolExecutionUpdate {
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: tool_name.clone(),
+                            args: args.clone(),
+                            partial_result: partial_result.clone(),
+                        }),
+                        AgentEvent::ToolExecutionEnd {
+                            tool_call_id,
+                            tool_name,
+                            result,
+                            is_error,
+                        } => Some(ContextEvent::ToolExecutionEnd {
+                            tool_call_id: tool_call_id.clone(),
+                            tool_name: tool_name.clone(),
+                            result: result.clone(),
+                            is_error: *is_error,
+                        }),
+                        _ => None,
+                    };
+                    if let Some(extension_event) = extension_event
+                        && let Err(e) = runner.emit_event(extension_event).await
+                    {
+                        tracing::warn!("Extension event dispatch failed: {e}");
                     }
                 }
 

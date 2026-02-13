@@ -27,7 +27,7 @@ pub fn validate_tool_arguments(tool: &Tool, tool_call: &ToolCall) -> Result<Valu
                         } else {
                             path_str
                         };
-                        format!("  - {}: {}", path, err)
+                        format!("  - {path}: {err}")
                     })
                     .collect();
 

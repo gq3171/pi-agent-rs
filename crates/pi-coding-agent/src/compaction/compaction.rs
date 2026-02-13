@@ -153,8 +153,8 @@ fn find_cut_point(messages: &[AgentMessage], keep_recent_tokens: u64) -> usize {
 
         if accumulated >= keep_recent_tokens {
             // Find the closest valid cut point at or after this index
-            for j in i..messages.len() {
-                if is_valid_cut_point(&messages[j]) {
+            for (j, msg) in messages.iter().enumerate().skip(i) {
+                if is_valid_cut_point(msg) {
                     cut_index = j;
                     break;
                 }

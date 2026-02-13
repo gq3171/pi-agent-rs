@@ -268,7 +268,7 @@ mod tests {
 
         let mut stream_pin = Box::pin(stream.clone());
         let mut count = 0;
-        while let Some(_) = stream_pin.next().await {
+        while (stream_pin.next().await).is_some() {
             count += 1;
         }
         // Only the Done event should be yielded
@@ -294,7 +294,7 @@ mod tests {
 
         let mut stream_pin = Box::pin(stream.clone());
         let mut count = 0;
-        while let Some(_) = stream_pin.next().await {
+        while (stream_pin.next().await).is_some() {
             count += 1;
         }
         // Only the Start event should be yielded (end doesn't push events)

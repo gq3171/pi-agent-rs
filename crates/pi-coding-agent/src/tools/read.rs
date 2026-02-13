@@ -70,8 +70,7 @@ impl ReadOperations for DefaultFileReader {
 
         if path_utils::is_image(path) && file_size > MAX_IMAGE_FILE_SIZE {
             return Err(format!(
-                "Image too large: {} bytes (limit: {} bytes)",
-                file_size, MAX_IMAGE_FILE_SIZE
+                "Image too large: {file_size} bytes (limit: {MAX_IMAGE_FILE_SIZE} bytes)"
             )
             .into());
         }
@@ -81,8 +80,7 @@ impl ReadOperations for DefaultFileReader {
             && file_size > MAX_TEXT_FILE_SIZE
         {
             return Err(format!(
-                "File too large: {} bytes (limit: {} bytes)",
-                file_size, MAX_TEXT_FILE_SIZE
+                "File too large: {file_size} bytes (limit: {MAX_TEXT_FILE_SIZE} bytes)"
             )
             .into());
         }

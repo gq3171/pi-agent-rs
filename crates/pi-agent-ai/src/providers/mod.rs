@@ -1,6 +1,7 @@
 pub mod anthropic;
 pub mod azure_openai_responses;
 pub mod bedrock;
+pub mod github_copilot_headers;
 pub mod google;
 pub mod google_gemini_cli;
 pub mod google_shared;

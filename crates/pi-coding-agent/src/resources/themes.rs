@@ -18,7 +18,7 @@ pub fn load_themes_from_dir(dir: &Path) -> Result<Vec<Theme>, Box<dyn std::error
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
-        if !path.extension().is_some_and(|ext| ext == "json") {
+        if path.extension().is_none_or(|ext| ext != "json") {
             continue;
         }
 

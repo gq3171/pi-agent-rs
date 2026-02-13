@@ -476,10 +476,7 @@ fn build_params(model: &Model, context: &Context, options: &GoogleOptions) -> Va
     let mut config: Value = json!({});
 
     // Only add generationConfig if it has any fields
-    if generation_config
-        .as_object()
-        .map_or(false, |o| !o.is_empty())
-    {
+    if generation_config.as_object().is_some_and(|o| !o.is_empty()) {
         // Merge generation config fields directly into the top level
         if let Some(obj) = generation_config.as_object() {
             for (k, v) in obj {
@@ -1014,7 +1011,7 @@ pub fn stream_google(
                                         let counter =
                                             TOOL_CALL_COUNTER.fetch_add(1, Ordering::Relaxed);
                                         let now = chrono::Utc::now().timestamp_millis();
-                                        format!("{}_{now}_{counter}", fc_name)
+                                        format!("{fc_name}_{now}_{counter}")
                                     } else {
                                         provided_id.unwrap()
                                     };

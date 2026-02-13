@@ -2,100 +2,100 @@ use std::collections::{HashMap, HashSet};
 
 use crate::types::*;
 
+type NormalizeToolCallIdFn<'a> = dyn Fn(&str, &Model, &AssistantMessage) -> String + 'a;
+
 /// Transform messages for cross-provider compatibility.
 /// Handles thinking block conversion, tool call ID normalization, and orphaned tool calls.
 pub fn transform_messages(
     messages: &[Message],
     model: &Model,
-    normalize_tool_call_id: Option<&dyn Fn(&str, &Model, &AssistantMessage) -> String>,
+    normalize_tool_call_id: Option<&NormalizeToolCallIdFn<'_>>,
 ) -> Vec<Message> {
     let mut tool_call_id_map: HashMap<String, String> = HashMap::new();
 
     // First pass: transform messages (thinking blocks, tool call ID normalization)
     let transformed: Vec<Message> = messages
         .iter()
-        .filter_map(|msg| {
-            match msg {
-                Message::User(_) => Some(msg.clone()),
-                Message::ToolResult(tr) => {
-                    if let Some(normalized_id) = tool_call_id_map.get(&tr.tool_call_id) {
-                        if normalized_id != &tr.tool_call_id {
-                            let mut new_tr = tr.clone();
-                            new_tr.tool_call_id = normalized_id.clone();
-                            return Some(Message::ToolResult(new_tr));
-                        }
+        .map(|msg| match msg {
+            Message::User(_) => msg.clone(),
+            Message::ToolResult(tr) => {
+                if let Some(normalized_id) = tool_call_id_map.get(&tr.tool_call_id) {
+                    if normalized_id != &tr.tool_call_id {
+                        let mut new_tr = tr.clone();
+                        new_tr.tool_call_id = normalized_id.clone();
+                        return Message::ToolResult(new_tr);
                     }
-                    Some(msg.clone())
                 }
-                Message::Assistant(assistant_msg) => {
-                    let is_same_model = assistant_msg.provider == model.provider
-                        && assistant_msg.api == model.api
-                        && assistant_msg.model == model.id;
+                msg.clone()
+            }
+            Message::Assistant(assistant_msg) => {
+                let is_same_model = assistant_msg.provider == model.provider
+                    && assistant_msg.api == model.api
+                    && assistant_msg.model == model.id;
 
-                    let transformed_content: Vec<ContentBlock> = assistant_msg
-                        .content
-                        .iter()
-                        .filter_map(|block| match block {
-                            ContentBlock::Thinking(t) => {
-                                // Same model with signature: keep
-                                if is_same_model && t.thinking_signature.is_some() {
-                                    return Some(block.clone());
-                                }
-                                // Empty thinking: skip
-                                if t.thinking.trim().is_empty() {
-                                    return None;
-                                }
-                                // Same model without signature: keep as-is
-                                if is_same_model {
-                                    return Some(block.clone());
-                                }
-                                // Cross-model: convert to text
+                let transformed_content: Vec<ContentBlock> = assistant_msg
+                    .content
+                    .iter()
+                    .filter_map(|block| match block {
+                        ContentBlock::Thinking(t) => {
+                            // Same model with signature: keep
+                            if is_same_model && t.thinking_signature.is_some() {
+                                return Some(block.clone());
+                            }
+                            // Empty thinking: skip
+                            if t.thinking.trim().is_empty() {
+                                return None;
+                            }
+                            // Same model without signature: keep as-is
+                            if is_same_model {
+                                return Some(block.clone());
+                            }
+                            // Cross-model: convert to text
+                            Some(ContentBlock::Text(TextContent {
+                                text: t.thinking.clone(),
+                                text_signature: None,
+                            }))
+                        }
+                        ContentBlock::Text(t) => {
+                            if is_same_model {
+                                Some(block.clone())
+                            } else {
+                                // Strip textSignature for cross-model
                                 Some(ContentBlock::Text(TextContent {
-                                    text: t.thinking.clone(),
+                                    text: t.text.clone(),
                                     text_signature: None,
                                 }))
                             }
-                            ContentBlock::Text(t) => {
-                                if is_same_model {
-                                    Some(block.clone())
-                                } else {
-                                    // Strip textSignature for cross-model
-                                    Some(ContentBlock::Text(TextContent {
-                                        text: t.text.clone(),
-                                        text_signature: None,
-                                    }))
-                                }
+                        }
+                        ContentBlock::ToolCall(tc) => {
+                            let mut normalized = tc.clone();
+
+                            // Strip thoughtSignature for cross-model
+                            if !is_same_model && normalized.thought_signature.is_some() {
+                                normalized.thought_signature = None;
                             }
-                            ContentBlock::ToolCall(tc) => {
-                                let mut normalized = tc.clone();
 
-                                // Strip thoughtSignature for cross-model
-                                if !is_same_model && normalized.thought_signature.is_some() {
-                                    normalized.thought_signature = None;
-                                }
-
-                                // Normalize tool call ID for cross-model
-                                if !is_same_model {
-                                    if let Some(normalize_fn) = normalize_tool_call_id {
-                                        let new_id = normalize_fn(&tc.id, model, assistant_msg);
-                                        if new_id != tc.id {
-                                            tool_call_id_map.insert(tc.id.clone(), new_id.clone());
-                                            normalized.id = new_id;
-                                        }
+                            // Normalize tool call ID for cross-model
+                            if !is_same_model {
+                                if let Some(normalize_fn) = normalize_tool_call_id {
+                                    let new_id = normalize_fn(&tc.id, model, assistant_msg);
+                                    if new_id != tc.id {
+                                        tool_call_id_map.insert(tc.id.clone(), new_id.clone());
+                                        normalized.id = new_id;
                                     }
                                 }
-
-                                Some(ContentBlock::ToolCall(normalized))
                             }
-                            _ => Some(block.clone()),
-                        })
-                        .collect();
 
-                    Some(Message::Assistant(AssistantMessage {
-                        content: transformed_content,
-                        ..assistant_msg.clone()
-                    }))
-                }
+                            Some(ContentBlock::ToolCall(normalized))
+                        }
+                        _ => Some(block.clone()),
+                    })
+                    .collect();
+
+                Message::Assistant(AssistantMessage {
+                    content: transformed_content,
+                    ..assistant_msg.clone()
+                })
             }
         })
         .collect();

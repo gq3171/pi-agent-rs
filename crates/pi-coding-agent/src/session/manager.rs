@@ -253,8 +253,7 @@ impl SessionManager {
         let mut file = create_new_restricted(&path).map_err(|e| {
             if e.kind() == std::io::ErrorKind::AlreadyExists {
                 CodingAgentError::Session(format!(
-                    "Fork target session already exists: {}",
-                    new_session_id
+                    "Fork target session already exists: {new_session_id}"
                 ))
             } else {
                 CodingAgentError::Io(e)
